@@ -429,13 +429,48 @@ pub fn engine_root() -> PathBuf {
     if let Some(p) = std::env::var_os("DUMB_ENGINE_ROOT").map(PathBuf::from).filter(|p| p.join("crates").exists()) {
         return p;
     }
+    // Release bundles ship the engine sources next to the executables.
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        if dir.join("crates").join("dumb_script").exists() {
+            return strip_unc(&dir.canonicalize().unwrap_or(dir));
+        }
+    }
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     strip_unc(&p.canonicalize().unwrap_or(p))
+}
+
+/// Scripts must be built by the same rustc as the editor (no stable ABI). Release bundles pin
+/// it in `rust-toolchain.toml`; export that channel as `RUSTUP_TOOLCHAIN` so every cargo the
+/// editor starts (script builds, checks, exports) uses it, wherever the project lives.
+/// Call at startup, before any threads exist.
+pub fn pin_rust_toolchain() {
+    if std::env::var_os("RUSTUP_TOOLCHAIN").is_some() {
+        return;
+    }
+    let Ok(text) = std::fs::read_to_string(engine_root().join("rust-toolchain.toml")) else { return };
+    if let Some(channel) = toolchain_channel(&text) {
+        log::info!("scripts build with Rust {channel} (rust-toolchain.toml)");
+        std::env::set_var("RUSTUP_TOOLCHAIN", channel);
+    }
+}
+
+fn toolchain_channel(toml: &str) -> Option<String> {
+    toml.lines()
+        .filter_map(|l| l.trim().strip_prefix("channel"))
+        .filter_map(|rest| rest.trim_start().strip_prefix('='))
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .find(|v| !v.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_toolchain_channel() {
+        assert_eq!(toolchain_channel("[toolchain]\nchannel = \"1.90.0\"\nprofile = \"minimal\"\n").as_deref(), Some("1.90.0"));
+        assert_eq!(toolchain_channel("[toolchain]\n"), None);
+    }
 
     #[test]
     fn scripts_outside_the_project_are_moved_in() {

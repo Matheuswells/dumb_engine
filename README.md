@@ -155,6 +155,30 @@ claude mcp add --transport http dumb-engine http://127.0.0.1:47100/mcp
 Turn it off or change the port in **Edit ▸ Preferences ▸ AI agents (MCP)**. See
 [docs/MCP.md](docs/MCP.md) for the tool list and conventions.
 
+## Releasing
+
+Cut a release from an up-to-date `main` with one command:
+
+```powershell
+.\tools\release.ps1 0.2.0            # Windows (add -DryRun to preview, -SkipTests to skip tests)
+```
+
+```bash
+tools/release.sh 0.2.0               # macOS / Linux / Git Bash (--dry-run, --skip-tests)
+```
+
+The script checks that the tree is clean and in sync with `origin/main`, bumps the workspace
+version, runs the tests, commits, tags `v0.2.0` and pushes. The tag starts the
+[Release workflow](.github/workflows/release.yml), which tests, builds and packages the
+Windows and Linux bundles and publishes them as a GitHub release with generated notes. If
+PowerShell blocks the script, run
+`powershell -ExecutionPolicy Bypass -File tools\release.ps1 0.2.0`.
+
+A bundle contains `dumb-editor`, `dumb-player`, the sample project and the engine sources,
+because game scripts compile against them. It also has a `rust-toolchain.toml` that pins the
+compiler the editor was built with, and the editor builds scripts with that compiler (rustup
+installs it on first use).
+
 ## Layout
 
 ```
@@ -170,7 +194,7 @@ crates/
   dumb_editor   the editor (and its MCP server for AI agents)
 project/Scripts         the demo project's scripts crate (one file per script)
 project/                sample project (Assets/, project.ron)
-tools/                  Blender demo generator, UI test helpers
+tools/                  Blender demo generator, UI test helpers, release scripts
 ```
 
 More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

@@ -334,6 +334,7 @@ impl ApplicationHandler for App {
 
 fn main() {
     let log = console::LogBuffer::install();
+    dumb_runtime::pin_rust_toolchain();
     // An explicit path wins; otherwise reopen the last project, or show the start screen.
     let project_dir = std::env::args().nth(1).map(PathBuf::from).or_else(project_manager::last_project);
     let el = EventLoop::new().expect("event loop");
