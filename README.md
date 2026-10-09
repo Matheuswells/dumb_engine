@@ -12,6 +12,14 @@ code is plain Rust in a hot-reloadable DLL.
 > editor → script in Rust → play, edit live, hot-reload → save. See
 > [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
 
+## ⚡ Features
+
+* **Zero-Brain Architecture:** No complex setups. If a 5-year-old with a keyboard can't figure it out, we haven't dumbed it down enough.
+* **Blazing Fast (Probably):** It's so light on features that your CPU won't even notice it's running.
+* **Advanced Physics:** Objects fall down. Sometimes they bounce. Don't push your luck.
+* **Photorealistic-ish Graphics:** Supports pixels, colored rectangles, and severe artistic compromises.
+* **Memory Management:** If it leaks memory, just restart your computer.
+
 ## Quick start
 
 ```bash
