@@ -1,0 +1,30 @@
+[package]
+name = "dumb_runtime"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "dumb-player"
+path = "src/bin/player.rs"
+
+[dependencies]
+dumb_core.workspace = true
+dumb_reflect.workspace = true
+dumb_ecs.workspace = true
+dumb_asset.workspace = true
+dumb_render.workspace = true
+dumb_script.workspace = true
+dumb_physics.workspace = true
+winit.workspace = true
+egui.workspace = true
+image.workspace = true
+egui-winit.workspace = true
+log.workspace = true
+env_logger.workspace = true
+serde.workspace = true
+ron.workspace = true
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+wry = "0.57"
+
+[dev-dependencies]
+log.workspace = true

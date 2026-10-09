@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dumb_core",
+    "crates/dumb_reflect",
+    "crates/dumb_derive",
+    "crates/dumb_ecs",
+    "crates/dumb_asset",
+    "crates/dumb_render",
+    "crates/dumb_script",
+    "crates/dumb_runtime",
+    "crates/dumb_editor",
+    "crates/dumb_physics",
+]
+# Each project owns a standalone scripts crate (its own workspace).
+exclude = ["project/Scripts"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+dumb_core = { path = "crates/dumb_core" }
+dumb_reflect = { path = "crates/dumb_reflect" }
+dumb_derive = { path = "crates/dumb_derive" }
+dumb_ecs = { path = "crates/dumb_ecs" }
+dumb_asset = { path = "crates/dumb_asset" }
+dumb_render = { path = "crates/dumb_render" }
+dumb_script = { path = "crates/dumb_script" }
+dumb_runtime = { path = "crates/dumb_runtime" }
+dumb_physics = { path = "crates/dumb_physics" }
+
+glam = { version = "0.30", features = ["serde", "bytemuck"] }
+serde = { version = "1", features = ["derive"] }
+ron = "0.10"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+rayon = "1.12"
+env_logger = "0.11"
+ash = "0.38"
+ash-window = "0.13"
+raw-window-handle = "0.6"
+winit = "0.30"
+egui = "0.36"
+egui-winit = { version = "0.36", default-features = false, features = ["clipboard", "links"] }
+gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "names", "utils", "import"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "hdr", "gif", "webp"] }
+notify = "8"
+libloading = "0.8"
+naga = { version = "26", features = ["wgsl-in", "spv-out"] }
+gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

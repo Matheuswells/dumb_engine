@@ -1,0 +1,13 @@
+(
+    name: "Dumb Demo",
+    startup_scene: "Scenes/Main.scene",
+    scripts_workspace: "Scripts",
+    scripts_package: "game_scripts",
+    gravity: (0.0, -9.81, 0.0),
+    physics_hz: 60,
+    physics_max_steps: 4,
+    max_fps: 0,
+    vsync: true,
+    window_size: (1280, 720),
+    fullscreen: false,
+)

@@ -1,0 +1,10 @@
+[package]
+name = "dumb_core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+uuid.workspace = true
+bytemuck.workspace = true

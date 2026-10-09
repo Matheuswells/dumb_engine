@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* Web panels are opaque rectangles: give the page a full background. */
+  html, body { margin: 0; height: 100%; background: radial-gradient(circle at 20% 0%, #2a2140, #12141a 70%); font-family: "Segoe UI", system-ui, sans-serif; color: #eef2f7; overflow: hidden; }
+  .card {
+    margin: 0; height: 100%; box-sizing: border-box; padding: 14px 16px; border-radius: 14px;
+    background: linear-gradient(135deg, rgba(20, 26, 38, .82), rgba(36, 22, 52, .78));
+    border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+    backdrop-filter: blur(6px);
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: .5px; }
+  h1 span { background: linear-gradient(90deg, #ffb347, #ff5e62, #b06ab3); -webkit-background-clip: text; color: transparent; animation: hue 6s linear infinite; }
+  @keyframes hue { to { filter: hue-rotate(360deg); } }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+  #clock { font: 600 22px Consolas, monospace; }
+  button { border: 0; border-radius: 8px; padding: 7px 14px; font-weight: 600; color: white; cursor: pointer;
+           background: linear-gradient(135deg, #3b82f6, #8b5cf6); transition: transform .1s; }
+  button:active { transform: scale(.95); }
+  video { width: 100%; border-radius: 10px; margin-top: 8px; }
+  .spin { width: 34px; height: 34px; animation: spin 3s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #msg { opacity: .8; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1><span>Web HUD</span> · HTML + CSS + JS</h1>
+    <div class="row">
+      <img class="spin" src="https://www.rust-lang.org/static/images/rust-logo-blk.svg" alt="https image" style="filter: invert(1)">
+      <div id="clock">--:--:--</div>
+      <button onclick="window.ipc.postMessage('heal')">Heal from web</button>
+    </div>
+    <div id="msg">Clicks send a message to the game (window.ipc.postMessage).</div>
+    <video src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" autoplay muted loop playsinline></video>
+  </div>
+<script>
+  setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 250);
+  // The game can call this with ctx.hud.web_eval(id, "setHealth(42)").
+  window.setHealth = (hp) => { document.getElementById('msg').textContent = 'Game says: health ' + hp; };
+</script>
+</body>
+</html>

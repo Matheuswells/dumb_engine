@@ -1,0 +1,20 @@
+[package]
+name = "dumb_render"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dumb_reflect.workspace = true
+dumb_core.workspace = true
+dumb_ecs.workspace = true
+dumb_asset.workspace = true
+ash.workspace = true
+ash-window.workspace = true
+raw-window-handle.workspace = true
+bytemuck.workspace = true
+log.workspace = true
+egui.workspace = true
+gpu-allocator.workspace = true
+
+[build-dependencies]
+naga.workspace = true

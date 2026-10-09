@@ -1,0 +1,18 @@
+[package]
+name = "dumb_asset"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dumb_core.workspace = true
+dumb_reflect.workspace = true
+dumb_ecs.workspace = true
+dumb_derive.workspace = true
+serde.workspace = true
+ron.workspace = true
+uuid.workspace = true
+log.workspace = true
+gltf.workspace = true
+image.workspace = true
+notify.workspace = true
+meshopt = "0.6"

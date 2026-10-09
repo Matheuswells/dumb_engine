@@ -1,0 +1,13 @@
+[package]
+name = "dumb_physics"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dumb_core.workspace = true
+dumb_reflect.workspace = true
+dumb_derive.workspace = true
+dumb_ecs.workspace = true
+dumb_asset.workspace = true
+log.workspace = true
+rapier3d = { version = "0.36", features = ["parallel"] }

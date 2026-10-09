@@ -1,0 +1,38 @@
+Struct([
+    ("albedo", Vec([
+        0.8,
+        0.08,
+        0.06,
+        1.0,
+    ])),
+    ("albedo_texture", Asset(("00000000-0000-0000-0000-000000000000"))),
+    ("normal_texture", Asset(("00000000-0000-0000-0000-000000000000"))),
+    ("normal_scale", Float(1.0)),
+    ("metallic", Float(0.0)),
+    ("roughness", Float(0.3499999940395355)),
+    ("metallic_roughness_texture", Asset(("00000000-0000-0000-0000-000000000000"))),
+    ("ao_texture", Asset(("00000000-0000-0000-0000-000000000000"))),
+    ("ao_strength", Float(1.0)),
+    ("emission", Vec([
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ])),
+    ("emission_strength", Float(1.0)),
+    ("emission_texture", Asset(("00000000-0000-0000-0000-000000000000"))),
+    ("alpha_mode", Enum("Opaque")),
+    ("alpha_cutoff", Float(0.5)),
+    ("double_sided", Bool(false)),
+    ("normal_format", Enum("OpenGL")),
+    ("roughness_source", Enum("Packed")),
+    ("uv_tiling", Vec([
+        1.0,
+        1.0,
+    ])),
+    ("uv_offset", Vec([
+        0.0,
+        0.0,
+    ])),
+    ("unlit", Bool(false)),
+])

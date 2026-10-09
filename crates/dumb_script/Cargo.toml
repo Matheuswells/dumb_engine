@@ -1,0 +1,12 @@
+[package]
+name = "dumb_script"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dumb_core.workspace = true
+dumb_reflect.workspace = true
+dumb_ecs.workspace = true
+dumb_derive.workspace = true
+libloading.workspace = true
+log.workspace = true

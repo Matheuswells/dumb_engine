@@ -1,0 +1,6 @@
+/target
+/project/Library
+*.dll.tmp*
+/.lsp
+/look here
+/.clj-kondo

@@ -1,0 +1,8 @@
+[package]
+name = "dumb_reflect"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dumb_core.workspace = true
+serde.workspace = true

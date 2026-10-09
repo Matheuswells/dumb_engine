@@ -1,0 +1,9 @@
+(
+    id: ("e7ba3467-1edb-4a58-9c5d-a2ba79345a6e"),
+    import: (
+        scale: 1.0,
+    ),
+    preload: false,
+    labels: [],
+    animation_events: [],
+)

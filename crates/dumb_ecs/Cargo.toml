@@ -1,0 +1,13 @@
+[package]
+name = "dumb_ecs"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dumb_core.workspace = true
+dumb_reflect.workspace = true
+dumb_derive.workspace = true
+serde.workspace = true
+ron.workspace = true
+log.workspace = true
+rayon.workspace = true
