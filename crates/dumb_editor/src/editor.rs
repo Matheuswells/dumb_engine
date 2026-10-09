@@ -1058,6 +1058,10 @@ impl Editor {
                 if let Some(p) = self.db.abs_path(id) {
                     #[cfg(windows)]
                     let _ = std::process::Command::new("cmd").args(["/C", "start", "", &p.display().to_string()]).spawn();
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&p).spawn();
+                    #[cfg(all(unix, not(target_os = "macos")))]
+                    let _ = std::process::Command::new("xdg-open").arg(&p).spawn();
                 }
             }
             None => {

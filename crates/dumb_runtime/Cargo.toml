@@ -24,7 +24,7 @@ env_logger.workspace = true
 serde.workspace = true
 ron.workspace = true
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
-wry = "0.57"
+wry = { version = "0.57", features = ["devtools"] }
 
 [dev-dependencies]
 log.workspace = true
