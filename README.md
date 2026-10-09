@@ -1,7 +1,7 @@
 # Dumb Engine
 
 Welcome to Dumb Engine, the game engine designed with minimal brainpower and maximum
-enthusiasm. Built for when you don't need a multi-million dollar rendering pipeline—you
+enthusiasm. Built for when you don't need a multi-million dollar rendering pipeline, you
 just need a box to move across the screen before you lose interest.
 
 Under the hood, it is a 3D game engine and editor written in Rust on Vulkan. It is built for performance,
