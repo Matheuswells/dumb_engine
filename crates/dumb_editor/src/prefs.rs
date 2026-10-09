@@ -25,6 +25,8 @@ pub struct EditorSettings {
     // Interface
     pub ui_scale: f32,
     pub theme: Theme,
+    /// Splash screen when the editor starts.
+    pub show_splash: bool,
     // Viewport
     pub show_grid: bool,
     pub show_bounds: bool,
@@ -66,6 +68,7 @@ impl Default for EditorSettings {
             vsync: true,
             ui_scale: 1.0,
             theme: Theme::Dark,
+            show_splash: true,
             show_grid: true,
             show_bounds: false,
             wireframe: false,
@@ -241,6 +244,7 @@ fn editor_tab(ui: &mut egui::Ui, s: &mut EditorSettings) -> bool {
         c |= ui.selectable_value(&mut s.theme, Theme::Dark, "Dark").changed();
         c |= ui.selectable_value(&mut s.theme, Theme::Light, "Light").changed();
     });
+    c |= ui.checkbox(&mut s.show_splash, "Show the splash screen at startup").changed();
 
     section(ui, "Scene view");
     ui.horizontal(|ui| {

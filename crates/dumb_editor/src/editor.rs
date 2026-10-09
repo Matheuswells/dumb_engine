@@ -236,6 +236,8 @@ pub struct Editor {
     add_comp_search: String,
     stats: FrameStats,
     pub window_title: Option<String>,
+    /// Help ▸ Splash Screen was chosen; the app shows it.
+    pub splash_requested: bool,
     next_tex_base: u64,
     status: Option<(String, Instant)>,
     fly_dt: f32,
@@ -330,6 +332,7 @@ impl Editor {
             add_comp_search: String::new(),
             stats: FrameStats::default(),
             window_title: None,
+            splash_requested: false,
             next_tex_base: 2_000_000,
             status: None,
             fly_dt: 0.016,
@@ -361,6 +364,11 @@ impl Editor {
         ed.open_dev_windows(renderer);
         ed.update_title();
         ed
+    }
+
+    /// Open the New Project dialog.
+    pub fn show_new_project(&mut self) {
+        self.new_project.show();
     }
 
     /// A world with script components registered.
@@ -1493,6 +1501,11 @@ impl Editor {
             }
         });
         ui.menu_button("Help", |ui| {
+            if ui.button("🎬 Splash Screen").clicked() {
+                self.splash_requested = true;
+                ui.close();
+            }
+            ui.separator();
             ui.label("Viewport: RMB+WASD/QE fly · MMB pan · Alt+LMB orbit · wheel zoom · F focus");
             ui.label("Gizmos: W move · E rotate · R scale · hold Ctrl to snap");
             ui.label("Play: Ctrl+P · Esc releases game input");

@@ -17,6 +17,7 @@ mod prefs;
 mod profiler_window;
 mod project_manager;
 mod script_tools;
+mod splash;
 mod viewport;
 mod web_browser;
 mod widgets;
@@ -51,6 +52,7 @@ struct Running {
     mcp: mcp::Host,
     /// Preferences while no project is open (the editor owns them otherwise).
     hub_settings: prefs::EditorSettings,
+    splash: splash::Splash,
 }
 
 struct App {
@@ -100,9 +102,10 @@ impl Running {
         self.service_mcp(log);
         let dt = self.last.elapsed().as_secs_f32();
         self.last = Instant::now();
-        let Running { window, renderer, egui_ctx, egui_state, editor, hub_form, hub_error, web, .. } = self;
+        let Running { window, renderer, egui_ctx, egui_state, editor, hub_form, hub_error, web, splash, hub_settings, .. } = self;
 
         let mut hub_action = None;
+        let mut splash_action = None;
         let (out, views) = match editor {
             Some(ed) => {
                 {
@@ -112,7 +115,10 @@ impl Running {
                 let raw = egui_state.take_egui_input(window);
                 let out = {
                     dumb_core::profile_scope!("editor ui");
-                    egui_ctx.run_ui(raw, |ui| ed.ui(ui, renderer))
+                    egui_ctx.run_ui(raw, |ui| {
+                        ed.ui(ui, renderer);
+                        splash_action = splash.ui(ui.ctx(), &mut ed.settings.show_splash);
+                    })
                 };
                 let views = {
                     dumb_core::profile_scope!("extract");
@@ -122,7 +128,14 @@ impl Running {
             }
             None => {
                 let raw = egui_state.take_egui_input(window);
-                let out = egui_ctx.run_ui(raw, |ui| hub_action = project_hub_ui(ui, hub_form, hub_error));
+                let show = hub_settings.show_splash;
+                let out = egui_ctx.run_ui(raw, |ui| {
+                    hub_action = project_hub_ui(ui, hub_form, hub_error);
+                    splash_action = splash.ui(ui.ctx(), &mut hub_settings.show_splash);
+                });
+                if hub_settings.show_splash != show {
+                    hub_settings.save();
+                }
                 (out, Vec::new())
             }
         };
@@ -167,6 +180,34 @@ impl Running {
         }
         if let Some(HubAction::Open(dir)) = hub_action {
             request = Some(ProjectRequest::Open(dir));
+        }
+        let splash_open = match splash_action {
+            Some(splash::SplashAction::Open(dir)) => Some(dir),
+            Some(splash::SplashAction::OpenDialog) => match project_manager::pick_project_folder() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    *hub_error = Some(e);
+                    None
+                }
+            },
+            Some(splash::SplashAction::NewProject) => {
+                match editor.as_mut() {
+                    Some(ed) => ed.show_new_project(),
+                    None => hub_form.show(),
+                }
+                None
+            }
+            None => None,
+        };
+        if let Some(dir) = splash_open {
+            match editor.as_mut() {
+                // Goes through the unsaved-changes prompt.
+                Some(ed) => ed.request(ProjectRequest::Open(dir)),
+                None => request = Some(ProjectRequest::Open(dir)),
+            }
+        }
+        if editor.as_mut().is_some_and(|ed| std::mem::take(&mut ed.splash_requested)) {
+            splash.show();
         }
         match request {
             Some(ProjectRequest::Open(dir)) => self.open_project(&dir, log),
@@ -232,8 +273,13 @@ impl ApplicationHandler for App {
             web: None,
             mcp: Default::default(),
             hub_settings: prefs::EditorSettings::load(),
+            splash: Default::default(),
         };
         running.mcp.sync(&running.hub_settings);
+        // Like Blender: greet on launch (not in scripted UI runs, which set DUMB_OPEN).
+        if running.hub_settings.show_splash && std::env::var_os("DUMB_OPEN").is_none() {
+            running.splash.show();
+        }
         if let Some(dir) = self.project_dir.take() {
             running.open_project(&dir, &self.log);
         }

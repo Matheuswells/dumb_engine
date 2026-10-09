@@ -134,7 +134,7 @@ simulates up to 90,000 entities.
 | **Physics** | Rapier: `RigidBody` (dynamic/static/kinematic), `Collider` (box, sphere, capsule, cylinder, convex hull, mesh, Blender `UCX_` proxies, auto-fit to the model), `CharacterController` (slopes, steps, ground snap). Fixed-rate simulation during Play, collider wireframes in the scene view |
 | **Sky** | Built-in sky panorama (embedded in the engine): background, sky-tinted ambient light and roughness-aware reflections. Cameras choose Skybox or Solid color |
 | **Preferences** | Edit ▸ Preferences. Editor: max FPS (or unlimited), background FPS, VSync, UI scale, theme, camera, snapping, play-mode and script options, custom code editor command. Project: startup scene, game max FPS, VSync, window size, fullscreen, gravity, physics rate |
-| **Other** | Console (per-level filters, engine/script source filter, repeated lines collapsed), scripts panel (systems, build log, panics per system), project manager, stats overlay |
+| **Other** | Blender-style splash screen (quick actions and recent projects; Help ▸ Splash Screen), console (per-level filters, engine/script source filter, repeated lines collapsed), scripts panel (systems, build log, panics per system), project manager, stats overlay |
 
 Viewport controls: RMB + WASD/QE to fly, MMB to pan, Alt+LMB to orbit, wheel to zoom,
 F to focus. Gizmos: W/E/R, hold Ctrl to snap. Ctrl+P plays, Ctrl+S saves,
