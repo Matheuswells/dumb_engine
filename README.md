@@ -140,6 +140,21 @@ Viewport controls: RMB + WASD/QE to fly, MMB to pan, Alt+LMB to orbit, wheel to 
 F to focus. Gizmos: W/E/R, hold Ctrl to snap. Ctrl+P plays, Ctrl+S saves,
 Ctrl+Z/Ctrl+Y undo and redo, Ctrl+D duplicates.
 
+## AI agents (MCP)
+
+The editor runs an MCP server on `http://127.0.0.1:47100/mcp` (local connections only), so
+AI agents can drive it. From one prompt, Claude Code can build a level, tune materials,
+write and hot-reload scripts, play the game, press keys, read the console and look at
+screenshots of the scene or game view. It has about 75 tools covering everything in the
+editor, and its edits are undoable like your own.
+
+```bash
+claude mcp add --transport http dumb-engine http://127.0.0.1:47100/mcp
+```
+
+Turn it off or change the port in **Edit ▸ Preferences ▸ AI agents (MCP)**. See
+[docs/MCP.md](docs/MCP.md) for the tool list and conventions.
+
 ## Layout
 
 ```
@@ -152,7 +167,7 @@ crates/
   dumb_render   Vulkan 1.3 renderer (ash), PBR + skinning, egui backend, offscreen views
   dumb_script   plugin ABI, ScriptHost (load / hot reload / cargo build)
   dumb_runtime  game loop pieces, project settings, standalone player
-  dumb_editor   the editor
+  dumb_editor   the editor (and its MCP server for AI agents)
 project/Scripts         the demo project's scripts crate (one file per script)
 project/                sample project (Assets/, project.ron)
 tools/                  Blender demo generator, UI test helpers

@@ -119,6 +119,9 @@ Undo works by snapshot. A burst of changes becomes one undo step once a frame pa
 with no change and no mouse button held, so a whole gizmo or slider drag is one step.
 Undo is disabled during play, because Stop restores the pre-play snapshot anyway.
 
+MCP tool calls ([MCP.md](MCP.md)) arrive on HTTP worker threads and run on the main thread
+before `pre_frame`, through the same actions the UI uses.
+
 ## Performance notes (MVP state)
 
 Measured on an RTX 3050 Laptop in a dev build with dependencies at opt-level 3:

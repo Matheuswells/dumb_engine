@@ -52,6 +52,10 @@ pub struct EditorSettings {
     // Play mode
     pub save_before_play: bool,
     pub clear_console_on_play: bool,
+    // AI agents
+    /// Serve MCP tools on localhost so AI agents can drive the editor.
+    pub mcp_enabled: bool,
+    pub mcp_port: u16,
 }
 
 impl Default for EditorSettings {
@@ -81,6 +85,8 @@ impl Default for EditorSettings {
             code_editor: String::new(),
             save_before_play: false,
             clear_console_on_play: true,
+            mcp_enabled: true,
+            mcp_port: crate::mcp::DEFAULT_PORT,
         }
     }
 }
@@ -281,6 +287,27 @@ fn editor_tab(ui: &mut egui::Ui, s: &mut EditorSettings) -> bool {
     section(ui, "Play mode");
     c |= ui.checkbox(&mut s.save_before_play, "Save scene before entering Play").changed();
     c |= ui.checkbox(&mut s.clear_console_on_play, "Clear console when entering Play").changed();
+
+    section(ui, "AI agents (MCP)");
+    c |= ui
+        .checkbox(&mut s.mcp_enabled, "Let AI agents control the editor (MCP server on this computer only)")
+        .on_hover_text("Claude Code, Claude Desktop and other MCP clients can inspect and edit scenes, assets and scripts, play the game and take screenshots.")
+        .changed();
+    ui.horizontal(|ui| {
+        ui.label("Port");
+        c |= ui.add(egui::DragValue::new(&mut s.mcp_port).range(1024..=65535)).changed();
+        ui.weak(crate::mcp::status());
+    });
+    if s.mcp_enabled {
+        let cmd = format!("claude mcp add --transport http dumb-engine http://127.0.0.1:{}/mcp", s.mcp_port);
+        ui.horizontal(|ui| {
+            ui.weak("Claude Code:");
+            ui.code(&cmd);
+            if ui.small_button("📋").on_hover_text("Copy").clicked() {
+                ui.ctx().copy_text(cmd.clone());
+            }
+        });
+    }
 
     section(ui, "Scripts");
     c |= ui.checkbox(&mut s.scripts_build_on_save, "Build on save").changed();

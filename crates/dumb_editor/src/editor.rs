@@ -19,6 +19,8 @@ use dumb_script::{ScriptHost, ScriptStatus};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+mod mcp_tools;
+
 pub enum Action {
     Select(Entity, bool),
     ClearSelection,
@@ -242,6 +244,10 @@ pub struct Editor {
     physics: Option<dumb_physics::Physics>,
     /// World streaming while playing (reset on stop).
     streamer: Option<dumb_runtime::streaming::Streamer>,
+    /// MCP tool calls that finish on a later frame (script builds, captures...).
+    mcp_waiting: Vec<mcp_tools::Waiting>,
+    /// Frames still to step for the MCP `step` tool.
+    mcp_steps: u32,
 }
 
 pub fn apply_style(ctx: &egui::Context, theme: Theme) {
@@ -330,6 +336,8 @@ impl Editor {
             pointer_down: false,
             physics: None,
             streamer: None,
+            mcp_waiting: Vec::new(),
+            mcp_steps: 0,
         };
 
         // Scripts first, so scene components resolve on load.

@@ -119,6 +119,40 @@ impl BuildWindow {
         }
     }
 
+    /// Start an export with the project's build settings (MCP `build_export`).
+    pub fn start_export(&mut self, project: &Project) -> Result<PathBuf, String> {
+        if self.job.is_some() {
+            return Err("an export is already running".into());
+        }
+        self.start(project);
+        Ok(Self::out_dir(project))
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// Progress, result and the last `log_lines` log lines (MCP `get_export_status`).
+    pub fn status_json(&self, log_lines: usize) -> serde_json::Value {
+        let state = match (&self.job, &self.result) {
+            (Some(_), _) => "running",
+            (None, Some(Ok(_))) => "succeeded",
+            (None, Some(Err(_))) => "failed",
+            (None, None) => "idle",
+        };
+        let log: Vec<String> = self.log.iter().rev().take(log_lines).rev().map(|(w, l)| if *w { format!("warning: {l}") } else { l.clone() }).collect();
+        serde_json::json!({
+            "state": state,
+            "step": self.step,
+            "progress": self.progress,
+            "seconds": self.job.as_ref().map(|j| j.started.elapsed().as_secs_f32()),
+            "executable": match &self.result { Some(Ok(p)) => Some(p.display().to_string()), _ => None },
+            "error": match &self.result { Some(Err(e)) => Some(e.clone()), _ => None },
+            "warnings": self.log.iter().filter(|(w, _)| *w).count(),
+            "log": log,
+        })
+    }
+
     pub fn ui(&mut self, ctx: &egui::Context, project: &mut Project, scenes: &[String], dirty_scenes: bool) -> BuildRequest {
         let mut req = BuildRequest::default();
         self.poll(project.settings.build.run_after);

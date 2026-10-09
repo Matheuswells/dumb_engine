@@ -10,6 +10,7 @@ mod gizmo;
 mod hierarchy;
 mod inspector;
 mod material_viewer;
+mod mcp;
 mod model_viewer;
 mod picking;
 mod prefs;
@@ -46,6 +47,10 @@ struct Running {
     focused: bool,
     /// Native web views (browser window, HUD web panels) of the open project.
     web: Option<dumb_runtime::web::WebLayer>,
+    /// MCP server for AI agents.
+    mcp: mcp::Host,
+    /// Preferences while no project is open (the editor owns them otherwise).
+    hub_settings: prefs::EditorSettings,
 }
 
 struct App {
@@ -72,11 +77,27 @@ impl Running {
         if let Some(mut old) = self.editor.take() {
             old.shutdown();
             old.release(&mut self.renderer);
+            self.hub_settings = old.settings.clone();
         }
         self.window.set_title("Dumb Engine");
     }
 
+    /// Run MCP tool calls that arrived since the last frame.
+    fn service_mcp(&mut self, log: &console::LogBuffer) {
+        let mut open = None;
+        for call in self.mcp.poll() {
+            match &mut self.editor {
+                Some(ed) => ed.mcp_handle(call, &mut self.renderer),
+                None => open = mcp::handle_without_project(call, &mut self.hub_settings).or(open),
+            }
+        }
+        if let Some(dir) = open {
+            self.open_project(&dir, log);
+        }
+    }
+
     fn frame(&mut self, el: &ActiveEventLoop, log: &console::LogBuffer) {
+        self.service_mcp(log);
         let dt = self.last.elapsed().as_secs_f32();
         self.last = Instant::now();
         let Running { window, renderer, egui_ctx, egui_state, editor, hub_form, hub_error, web, .. } = self;
@@ -132,6 +153,9 @@ impl Running {
         );
         let mut delta = out.textures_delta;
         delta.clear();
+        if let Some(ed) = editor.as_mut() {
+            ed.mcp_after_render(renderer);
+        }
 
         let mut request = None;
         if let Some(ed) = editor {
@@ -153,6 +177,7 @@ impl Running {
             }
             None => {}
         }
+        self.mcp.sync(self.editor.as_ref().map_or(&self.hub_settings, |e| &e.settings));
     }
 }
 
@@ -205,7 +230,10 @@ impl ApplicationHandler for App {
             limiter: Default::default(),
             focused: true,
             web: None,
+            mcp: Default::default(),
+            hub_settings: prefs::EditorSettings::load(),
         };
+        running.mcp.sync(&running.hub_settings);
         if let Some(dir) = self.project_dir.take() {
             running.open_project(&dir, &self.log);
         }
@@ -248,7 +276,11 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _el: &ActiveEventLoop) {
-        if let Some(r) = &self.running {
+        if let Some(r) = &mut self.running {
+            // Minimized windows get no redraws: keep answering MCP calls anyway.
+            if r.last.elapsed() > std::time::Duration::from_millis(250) {
+                r.service_mcp(&self.log);
+            }
             r.window.request_redraw();
         }
     }

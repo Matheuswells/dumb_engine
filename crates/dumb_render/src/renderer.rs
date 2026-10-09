@@ -1348,4 +1348,30 @@ impl Renderer {
     pub fn engine_vram(&self) -> u64 {
         self.ctx.engine_vram()
     }
+
+    /// Copy a render target's last frame back to the CPU as tightly packed RGBA8
+    /// (width, height, pixels). Waits for the GPU, so it is for tools, not per-frame use.
+    pub fn read_target(&mut self, id: RenderTargetId) -> Option<(u32, u32, Vec<u8>)> {
+        let (image, extent) = {
+            let t = self.targets.get(&id)?;
+            (t.color.image, t.color.extent)
+        };
+        debug_assert_eq!(COLOR_FORMAT, vk::Format::R8G8B8A8_UNORM);
+        let size = extent.width as u64 * extent.height as u64 * 4;
+        let buf = self.ctx.create_buffer(size, vk::BufferUsageFlags::TRANSFER_DST, MemoryLocation::GpuToCpu, "target readback");
+        unsafe { self.ctx.device.device_wait_idle().ok() };
+        let (device, dst) = (self.ctx.device.clone(), buf.buffer);
+        self.ctx.immediate(|cb| {
+            let color = vk::ImageAspectFlags::COLOR;
+            barrier(&device, cb, image, color, 0, 1, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+            let region = vk::BufferImageCopy::default()
+                .image_subresource(vk::ImageSubresourceLayers::default().aspect_mask(color).mip_level(0).base_array_layer(0).layer_count(1))
+                .image_extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 });
+            unsafe { device.cmd_copy_image_to_buffer(cb, image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, dst, &[region]) };
+            barrier(&device, cb, image, color, 0, 1, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        });
+        let pixels = buf.alloc.as_ref().and_then(|a| a.mapped_slice()).map(|s| s[..size as usize].to_vec());
+        self.ctx.destroy_buffer(buf);
+        Some((extent.width, extent.height, pixels?))
+    }
 }
