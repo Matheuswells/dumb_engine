@@ -45,7 +45,7 @@ simulation):
 - ✅ `Commands` (deferred spawn/despawn/insert, usable from parallel queries), typed events
   (`world.send_event` / `world.events::<E>()`, double-buffered per frame) and resources
   (singleton components: `world.resource::<T>()`, `insert_resource`, `resource_or_default`).
-- Audio (spatial, streaming) and networking (snapshot or rollback).
+- Audio (spatial, streaming). Networking: see 3.1.
 
 ## 3.1 Dedicated server and replication
 Authoritative multiplayer for persistent shared worlds (MMO-scale sandboxes): one headless
@@ -53,6 +53,9 @@ server owns the simulation, clients render and send input.
 - Headless server build: a `render` feature on `dumb_runtime` so the simulation, physics,
   scripts and scene/asset loading compile without `dumb_render`, winit, egui or wry, plus a
   `dumb-server` binary that runs a project with no window or GPU (assets load as data only).
+  `simulate()` currently calls `dumb_render::find_primary_camera` for the streaming focus, so
+  that moves behind a focus provider (per-client positions on the server), and `dumb-player`
+  gets `required-features = ["render"]`.
 - Authoritative fixed tick: the server runs `simulate()` at a fixed rate (e.g. 30 Hz) apart
   from any frame rate, stamps state with a tick number, and exposes `is_server()` /
   `is_client()` so scripts can gate logic. Builds on the fixed-timestep loop above.
@@ -61,7 +64,9 @@ server owns the simulation, clients render and send input.
   (latency, jitter, loss, reordering) for testing.
 - Replication: a `Replicated` component marks entities. Each tick the server diffs their
   reflected components (the same `Value` path as scenes) and sends delta snapshots with
-  server→client entity id mapping. Clients apply them and interpolate through a jitter buffer.
+  server→client entity id mapping (including entity references inside component values).
+  Clients apply them and interpolate through a jitter buffer; client-side prediction with
+  server reconciliation for the owned character.
 - Interest management: a spatial hash grid resource (also usable for gameplay queries), a
   per-connection area of interest so clients only receive nearby entities (spawn/despawn on
   enter/leave), and a per-connection bandwidth budget prioritized by distance, like the
@@ -69,6 +74,9 @@ server owns the simulation, clients render and send input.
 - Client input and RPCs: clients send input commands, never replicated state. The server
   validates every command (the trust boundary), and scripts get typed client→server and
   server→client messages with per-entity ownership.
+- Session security and persistence: connection handshake with authentication and a cookie
+  challenge against UDP spoofing/amplification, per-connection rate limits, and periodic
+  world save/restore on the server so the shared world survives restarts.
 
 ## 4. Animation
 - State machines and blend trees as assets, plus animation events dispatched to scripts.
