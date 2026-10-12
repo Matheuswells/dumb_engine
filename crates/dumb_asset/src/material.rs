@@ -1,4 +1,4 @@
-use dumb_core::{AssetId, Color, Vec2};
+use dumb_core::{AssetId, Color, Vec2, Vec4};
 use dumb_derive::Editor;
 
 /// Normal map convention: OpenGL (Y+, Blender/glTF) or DirectX (Y-, flips green).
@@ -74,6 +74,12 @@ pub struct MaterialData {
     pub uv_offset: Vec2,
     /// Ignore lighting: show albedo (+ emission) as is.
     pub unlit: bool,
+    /// Custom surface shader (.wgsl). None = the standard PBR shader.
+    #[editor(asset = "shader")]
+    pub shader: AssetId,
+    /// Free parameters for the custom shader (`params0()` / `params1()` in WGSL).
+    pub shader_params0: Vec4,
+    pub shader_params1: Vec4,
 }
 
 impl Default for MaterialData {
@@ -100,6 +106,9 @@ impl Default for MaterialData {
             uv_tiling: Vec2::ONE,
             uv_offset: Vec2::ZERO,
             unlit: false,
+            shader: AssetId::NONE,
+            shader_params0: Vec4::ZERO,
+            shader_params1: Vec4::ZERO,
         }
     }
 }

@@ -120,6 +120,37 @@ source. The demo's scripts are in [project/Scripts/src](project/Scripts/src): pl
 a spinner, procedural bobbing, value noise, and a procedural block field that spawns and
 simulates up to 90,000 entities.
 
+## Writing shaders
+
+Materials can use a custom **surface shader**: a `.wgsl` asset that defines only
+
+```wgsl
+fn surface(s: Surface) -> vec4<f32> {
+    let color = lit(s, s.albedo.rgb, material_metallic(), material_roughness());
+    return vec4<f32>(tonemap(color), s.albedo.a);
+}
+```
+
+and, optionally, `fn vertex(v: Vertex) -> Vertex` to move vertices in world space (waves,
+wind). The engine adds the bindings, instancing, skinning and entry points, and compiles the
+shader at runtime with naga. `Surface` holds the position, normal, view direction, uv,
+albedo (material color × texture × tint), pixel, object position and time. Helpers include
+`lit` (the standard PBR lighting), `tonemap`, `shadow`, `sun_direction`, `sun_color`,
+`ambient`, `sky`, `albedo_texture`, `time` and `params0()` / `params1()`: two vec4s each
+material sets in **Shader params**.
+
+- **Create ▸ Shader** (or **Material with shader**) in the asset browser starts from a
+  template that documents the API.
+- Double-click a shader to open the **shader viewer** (live preview on a sphere, cube, plane
+  or cylinder; compile errors that jump to their line; preview parameters) and the built-in
+  code editor, which highlights WGSL and shows compile errors as you type.
+- Saving recompiles. A shader with errors keeps drawing its last version that compiled.
+- Pick the shader in the material editor's **Shader** section.
+- `cargo run -p dumb_render --example check_shader -- file.wgsl` checks shaders from a terminal.
+
+For a comic look, add **InkOutline** to the camera: dark lines at silhouettes and creases,
+drawn as a post effect from the depth buffer.
+
 ## Editor
 
 | | |

@@ -112,6 +112,9 @@ fn all() -> Vec<Def> {
         read("get_material", "A material's fields (albedo, textures, metallic, roughness, emission, alpha...).", json!({ "material": asset("Material") }), &["material"]),
         def("set_material", "Change fields of a material asset (.mat). Only the fields you pass change.", json!({ "material": asset("Material"), "values": { "type": "object" } }), &["material", "values"]),
         def("extract_material", "Copy a model's embedded material into an editable .mat asset.", json!({ "material": asset("Embedded material (sub-asset UUID)"), "name": { "type": "string" } }), &["material"]),
+        def("create_shader", "Create a surface shader (.wgsl) and report its compile errors. A shader defines `fn surface(s: Surface) -> vec4<f32>` (and optionally `fn vertex(v: Vertex) -> Vertex`); materials use it through their `shader` field and pass `shader_params0/1` (vec4). Omit `source` for the template, which documents the API.", json!({ "name": { "type": "string" }, "source": { "type": "string", "description": "WGSL source (default: the template)" }, "folder": { "type": "string", "description": "Folder under Assets/ (default Shaders)" } }), &["name"]),
+        read("get_shader", "A shader's source, its compile errors (line numbers are the file's), and the shader API summary.", json!({ "shader": asset("Shader") }), &["shader"]),
+        def("set_shader", "Replace a shader's source; returns its compile errors. Materials using it update live (a shader with errors keeps drawing its last good version).", json!({ "shader": asset("Shader"), "source": { "type": "string" } }), &["shader", "source"]),
         // ------------------------------------------------------------ assets & files
         read("list_assets", "Assets in the project. Filter by folder, kind or text.", json!({
             "folder": { "type": "string", "description": "Folder under Assets/ (default: everything)" },

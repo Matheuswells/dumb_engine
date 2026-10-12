@@ -7,13 +7,14 @@ use crate::gizmo::{Gizmo, GizmoMode, GizmoSpace, GizmoView};
 use crate::hierarchy::{create_menu, entity_label, hierarchy_ui, HierarchyState};
 use crate::inspector::{add_component_menu, entity_inspector, ComponentAction, InspectCtx};
 use crate::material_viewer::MaterialViewer;
+use crate::shader_viewer::ShaderViewer;
 use crate::model_viewer::ModelViewer;
 use crate::prefs::{EditorSettings, PreferencesWindow, Theme};
 use crate::project_manager::{pick_project_folder, recent_projects, NewProjectForm};
 use dumb_asset::{AssetDatabase, AssetEvent, AssetKind};
 use dumb_core::{builtin, Aabb, AssetId, Color, Entity, Input, Mat4, Time, Vec2, Vec3};
 use dumb_ecs::{Animator, Camera, Light, LightKind, MeshRenderer, Name, Parent, PrefabInstance, SceneData, Transform, World};
-use dumb_render::{camera_view, extract_world, find_primary_camera, push_model, ExtractOptions, RenderTargetId, RenderView, Renderer};
+use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, push_model, ExtractOptions, RenderTargetId, RenderView, Renderer};
 use dumb_runtime::{feed_input, simulate, Project};
 use dumb_script::{ScriptHost, ScriptStatus};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,8 @@ pub enum Action {
     OpenAsset(AssetId),
     OpenAnimationViewer(AssetId),
     OpenMaterial(AssetId),
+    /// Save a new material using a shader (from the shader viewer).
+    CreateShaderMaterial(AssetId, dumb_asset::MaterialData),
     ExtractMaterial(AssetId, String),
     DeleteSelection,
     DuplicateSelection,
@@ -206,6 +209,7 @@ pub struct Editor {
     log: LogBuffer,
     model_viewers: Vec<ModelViewer>,
     material_viewers: Vec<MaterialViewer>,
+    shader_viewers: Vec<ShaderViewer>,
     pub settings: EditorSettings,
     /// Last saved/applied copy, to detect changes from any menu.
     applied_settings: Option<EditorSettings>,
@@ -313,6 +317,7 @@ impl Editor {
             log,
             model_viewers: Vec::new(),
             material_viewers: Vec::new(),
+            shader_viewers: Vec::new(),
             settings: EditorSettings::load(),
             applied_settings: None,
             style_dirty: true,
@@ -476,6 +481,9 @@ impl Editor {
             v.release(renderer);
         }
         for v in &self.material_viewers {
+            renderer.destroy_target(v.preview.target);
+        }
+        for v in &self.shader_viewers {
             renderer.destroy_target(v.preview.target);
         }
         for t in self.browser.thumbs.thumbs.values() {
@@ -898,6 +906,26 @@ impl Editor {
                         self.material_viewers.push(MaterialViewer::new(id, renderer));
                     }
                 }
+                Action::CreateShaderMaterial(shader, m) => {
+                    let folder = self.db.entry(shader).map(|e| e.folder().to_string()).unwrap_or_default();
+                    let base = format!("{} Material", self.db.display_name(shader));
+                    let mut n = 0;
+                    let rel = loop {
+                        let name = if n == 0 { base.clone() } else { format!("{base} {n}") };
+                        let rel = if folder.is_empty() { format!("{name}.mat") } else { format!("{folder}/{name}.mat") };
+                        if !self.db.assets_root.join(&rel).exists() {
+                            break rel;
+                        }
+                        n += 1;
+                    };
+                    match self.db.write_asset(&rel, &m.to_ron()) {
+                        Ok(id) => {
+                            self.set_status(format!("Created {rel}"));
+                            self.material_viewers.push(MaterialViewer::new(id, renderer));
+                        }
+                        Err(e) => self.set_status(format!("Create failed: {e}")),
+                    }
+                }
                 Action::ExtractMaterial(id, name) => {
                     if let Some(m) = self.db.material(id) {
                         let name = name.replace(['/', '\\', ':'], "_");
@@ -1104,7 +1132,15 @@ impl Editor {
             Some(AssetKind::Prefab) => {
                 self.spawn_asset(id, None, None, renderer);
             }
-            Some(AssetKind::Script) | Some(AssetKind::Shader) | Some(AssetKind::Other) | Some(AssetKind::Texture) | Some(AssetKind::Audio) => {
+            Some(AssetKind::Shader) => {
+                if !self.shader_viewers.iter().any(|v| v.id == id) {
+                    self.shader_viewers.push(ShaderViewer::new(id, renderer));
+                }
+                if let Some(p) = self.db.abs_path(id) {
+                    crate::script_tools::open_in_code_editor(&p, None, None);
+                }
+            }
+            Some(AssetKind::Script) | Some(AssetKind::Other) | Some(AssetKind::Texture) | Some(AssetKind::Audio) => {
                 if let Some(p) = self.db.abs_path(id) {
                     #[cfg(windows)]
                     let _ = std::process::Command::new("cmd").args(["/C", "start", "", &p.display().to_string()]).spawn();
@@ -1190,6 +1226,13 @@ impl Editor {
         for v in material_viewers.iter_mut() {
             v.ui(&ctx, db, renderer, actions, &mut browser.thumbs);
         }
+        for v in self.shader_viewers.iter_mut() {
+            v.ui(&ctx, &mut self.db, renderer, &mut self.actions);
+        }
+        for v in self.shader_viewers.iter().filter(|v| !v.open) {
+            renderer.destroy_target(v.preview.target);
+        }
+        self.shader_viewers.retain(|v| v.open);
         for v in self.model_viewers.iter().filter(|v| !v.open) {
             v.release(renderer);
         }
@@ -2202,12 +2245,14 @@ impl Editor {
             let aspect = self.game_rect.width().max(1.0) / self.game_rect.height().max(1.0);
             let mut v = RenderView::new(self.game_target);
             v.time = elapsed;
-            if let Some((view, proj, pos, clear, sky)) = find_primary_camera(&d.world).and_then(|c| camera_view(&d.world, c, aspect)) {
+            let cam = find_primary_camera(&d.world);
+            if let Some((view, proj, pos, clear, sky)) = cam.and_then(|c| camera_view(&d.world, c, aspect)) {
                 v.sky = sky;
                 v.view = view;
                 v.proj = proj;
                 v.camera_pos = pos;
                 v.clear_color = clear;
+                v.ink = cam.and_then(|c| camera_ink(&d.world, c));
                 self.game_cam = (proj * view, pos);
                 let culled = extract_world(&d.world, &mut self.db, &mut v, &ExtractOptions { frustum_cull: self.settings.frustum_cull, ..Default::default() });
                 self.stats.culled = culled;
@@ -2226,6 +2271,11 @@ impl Editor {
         }
         for mv in &mut self.material_viewers {
             if let Some(v) = mv.render_view(&mut self.db) {
+                views.push(v);
+            }
+        }
+        for sv in &mut self.shader_viewers {
+            if let Some(v) = sv.render_view(&mut self.db) {
                 views.push(v);
             }
         }

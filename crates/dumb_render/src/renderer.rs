@@ -35,6 +35,8 @@ struct ViewUniforms {
     shadow_params: [f32; 4],
     /// Camera forward (for picking the cascade by view depth).
     cam_forward: [f32; 4],
+    /// Target size in pixels (xy) and its inverse (zw).
+    screen: [f32; 4],
 }
 
 const _: () = assert!(std::mem::size_of::<ViewUniforms>() as u64 <= VIEW_STRIDE);
@@ -48,11 +50,14 @@ struct MeshPush {
     pbr: [f32; 4],
     /// uv tiling (xy), uv offset (zw).
     uv: [f32; 4],
-    /// material flags, alpha cutoff bits, unused, unused.
+    /// material flags, alpha cutoff bits, shadow cascade, unused.
     misc: [u32; 4],
+    /// Custom shader parameters (`params0()` / `params1()`), or the ink settings.
+    params0: [f32; 4],
+    params1: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<MeshPush>() == 80);
+const _: () = assert!(std::mem::size_of::<MeshPush>() == 112);
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -108,6 +113,17 @@ pub struct RenderTarget {
     pub depth: Image,
     pub egui_id: egui::TextureId,
     egui_set: vk::DescriptorSet,
+    /// The depth image as a texture, for post effects (ink outlines).
+    depth_set: vk::DescriptorSet,
+}
+
+/// A compiled user surface shader: its pipelines, or why it failed.
+struct CustomShader {
+    /// Asset version the shader was compiled from.
+    version: u64,
+    /// Pipelines of the last version that compiled (kept while a newer one has errors).
+    pipelines: Vec<(MeshVariant, vk::Pipeline)>,
+    errors: Vec<crate::custom_shader::ShaderError>,
 }
 
 struct EguiTexture {
@@ -141,6 +157,7 @@ pub struct Renderer {
     shadow_map: ShadowMap,
     /// GPU time of the last measured frame (ms).
     pub gpu_ms: f32,
+    custom_shaders: HashMap<dumb_core::AssetId, CustomShader>,
 }
 
 /// The built-in skybox: an equirectangular panorama with a full mip chain (for rough reflections).
@@ -351,6 +368,7 @@ impl Renderer {
                 sky,
                 shadow_map,
                 gpu_ms: 0.0,
+                custom_shaders: HashMap::new(),
             })
         }
     }
@@ -413,14 +431,15 @@ impl Renderer {
             false,
             "target color",
         );
-        let depth = self.ctx.create_image(extent, DEPTH_FORMAT, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, 1, false, "target depth");
+        let depth = self.ctx.create_image(extent, DEPTH_FORMAT, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED, 1, false, "target depth");
         // Put the color image in a readable layout so it can be shown before the first render.
         let (img, device) = (color.image, self.ctx.device.clone());
         self.ctx.immediate(|cb| {
             barrier(&device, cb, img, vk::ImageAspectFlags::COLOR, 0, 1, vk::ImageLayout::UNDEFINED, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
         });
         let egui_set = self.alloc_egui_set(color.view);
-        RenderTarget { color, depth, egui_id, egui_set }
+        let depth_set = self.alloc_egui_set(depth.view);
+        RenderTarget { color, depth, egui_id, egui_set, depth_set }
     }
 
     /// Resize a target if its size changed. Cheap no-op otherwise.
@@ -434,12 +453,14 @@ impl Renderer {
         let new = self.make_target(width, height, egui_id);
         if let Some(old) = self.targets.insert(id, new) {
             self.pending_garbage.push(Garbage::Target(old.color, old.depth, old.egui_set));
+            self.pending_garbage.push(Garbage::EguiTexture(None, old.depth_set));
         }
     }
 
     pub fn destroy_target(&mut self, id: RenderTargetId) {
         if let Some(old) = self.targets.remove(&id) {
             self.pending_garbage.push(Garbage::Target(old.color, old.depth, old.egui_set));
+            self.pending_garbage.push(Garbage::EguiTexture(None, old.depth_set));
         }
     }
 
@@ -549,6 +570,11 @@ impl Renderer {
                 self.ctx.destroy_image(d);
                 unsafe { self.ctx.device.free_descriptor_sets(self.egui_pool, &[set]).ok() };
             }
+            Garbage::Pipelines(pipes) => {
+                for p in pipes {
+                    unsafe { self.ctx.device.destroy_pipeline(p, None) };
+                }
+            }
             Garbage::EguiTexture(img, set) => {
                 if let Some(i) = img {
                     self.ctx.destroy_image(i);
@@ -556,6 +582,46 @@ impl Renderer {
                 unsafe { self.ctx.device.free_descriptor_sets(self.egui_pool, &[set]).ok() };
             }
         }
+    }
+
+    /// Compile a material's custom shader, or recompile it after its file changed. A shader
+    /// with errors keeps the pipelines of its last good version (or draws as standard PBR).
+    fn ensure_custom_shader(&mut self, db: &mut AssetDatabase, id: dumb_core::AssetId) {
+        db.load(id);
+        let version = db.version(id);
+        if version == 0 || self.custom_shaders.get(&id).is_some_and(|c| c.version == version) {
+            return;
+        }
+        let name = db.display_name(id);
+        let src = db.read_asset_text(id).unwrap_or_default();
+        let entry = self.custom_shaders.entry(id).or_insert(CustomShader { version, pipelines: Vec::new(), errors: Vec::new() });
+        entry.version = version;
+        match crate::custom_shader::compile(&src) {
+            Ok(words) => {
+                let module = unsafe {
+                    self.ctx.device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&words), None).expect("shader module")
+                };
+                let new = self.pipelines.mesh_variants(&self.ctx, module);
+                unsafe { self.ctx.device.destroy_shader_module(module, None) };
+                let old = std::mem::replace(&mut entry.pipelines, new);
+                if !old.is_empty() {
+                    self.pending_garbage.push(Garbage::Pipelines(old.into_iter().map(|(_, p)| p).collect()));
+                }
+                entry.errors.clear();
+                log::info!("shader {name} compiled");
+            }
+            Err(errors) => {
+                for e in &errors {
+                    log::error!("shader {name}: {e}");
+                }
+                entry.errors = errors;
+            }
+        }
+    }
+
+    /// Compile errors of a custom shader (empty when it compiled; `None` until it's been used).
+    pub fn shader_errors(&self, id: dumb_core::AssetId) -> Option<&[crate::custom_shader::ShaderError]> {
+        self.custom_shaders.get(&id).map(|c| c.errors.as_slice())
     }
 
     /// Grow a per-frame host buffer if needed.
@@ -677,6 +743,13 @@ impl Renderer {
                 }
             }
         }
+        if let Some(db) = db.as_deref_mut() {
+            let shaders: std::collections::HashSet<dumb_core::AssetId> =
+                material_sets.values().map(|(_, m)| m.shader).filter(|s| !s.is_none()).collect();
+            for s in shaders {
+                self.ensure_custom_shader(db, s);
+            }
+        }
         for g in new_garbage {
             self.pending_garbage.push(g);
         }
@@ -688,7 +761,8 @@ impl Renderer {
             let mut joints_written = 0u64;
             let frame = &mut self.frames[fi];
             for (vi, v) in views.iter().enumerate().take(MAX_VIEWS as usize) {
-                let u = view_uniforms(v, &self.sky);
+                let size = self.targets.get(&v.target).map_or(vk::Extent2D { width: 1, height: 1 }, |t| t.color.extent);
+                let u = view_uniforms(v, &self.sky, size);
                 frame.view_ubo.write(vi as u64 * VIEW_STRIDE, bytemuck::bytes_of(&u));
                 let n = v.joints.len() as u64;
                 if joints_written + n <= MAX_JOINTS {
@@ -891,6 +965,8 @@ impl Renderer {
                                 pbr: [0.0; 4],
                                 uv: [mat.uv_tiling.x, mat.uv_tiling.y, mat.uv_offset.x, mat.uv_offset.y],
                                 misc: [material_flags(mat), mat.alpha_cutoff.to_bits(), c as u32, 0],
+                                params0: [0.0; 4],
+                                params1: [0.0; 4],
                             };
                             device.cmd_push_constants(
                                 cb,
@@ -926,7 +1002,8 @@ impl Renderer {
                     .image_view(target.depth.view)
                     .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
                     .load_op(vk::AttachmentLoadOp::CLEAR)
-                    .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                    // Kept for post effects (ink outlines read it).
+                    .store_op(if v.ink.is_some() { vk::AttachmentStoreOp::STORE } else { vk::AttachmentStoreOp::DONT_CARE })
                     .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 } });
                 device.cmd_begin_rendering(
                     cb,
@@ -962,7 +1039,10 @@ impl Renderer {
                         wireframe: v.wireframe,
                         blend: mat.alpha_mode == AlphaMode::Blend,
                     };
-                    let pipe = self.pipelines.mesh_pipeline(variant);
+                    let pipe = match self.custom_shaders.get(&mat.shader) {
+                        Some(c) if !mat.shader.is_none() && !c.pipelines.is_empty() => crate::pipelines::pick_variant(&c.pipelines, variant),
+                        _ => self.pipelines.mesh_pipeline(variant),
+                    };
                     if pipe != bound_pipeline {
                         device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipe);
                         bound_pipeline = pipe;
@@ -978,6 +1058,8 @@ impl Renderer {
                         pbr: [mat.metallic, mat.roughness, mat.normal_scale, mat.ao_strength],
                         uv: [mat.uv_tiling.x, mat.uv_tiling.y, mat.uv_offset.x, mat.uv_offset.y],
                         misc: [material_flags(mat), mat.alpha_cutoff.to_bits(), 0, 0],
+                        params0: mat.shader_params0.to_array(),
+                        params1: mat.shader_params1.to_array(),
                     };
                     device.cmd_push_constants(
                         cb,
@@ -1011,6 +1093,45 @@ impl Renderer {
                 }
 
                 device.cmd_end_rendering(cb);
+
+                // ---- ink outlines: a full-screen pass reading the depth just rendered
+                if let Some(ink) = v.ink {
+                    barrier(&device, cb, target.depth.image, vk::ImageAspectFlags::DEPTH, 0, 1, vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                    let ink_att = [vk::RenderingAttachmentInfo::default()
+                        .image_view(target.color.view)
+                        .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                        .load_op(vk::AttachmentLoadOp::LOAD)
+                        .store_op(vk::AttachmentStoreOp::STORE)];
+                    device.cmd_begin_rendering(
+                        cb,
+                        &vk::RenderingInfo::default()
+                            .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent })
+                            .layer_count(1)
+                            .color_attachments(&ink_att),
+                    );
+                    device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipelines.ink);
+                    device.cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint::GRAPHICS, self.pipelines.ink_layout, 0, &[frame.set0], &dyn_off);
+                    device.cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint::GRAPHICS, self.pipelines.ink_layout, 2, &[target.depth_set], &[]);
+                    let c = ink.color;
+                    let push = MeshPush {
+                        albedo: [0.0; 4],
+                        emission: [0.0; 4],
+                        pbr: [0.0; 4],
+                        uv: [0.0; 4],
+                        misc: [0; 4],
+                        params0: [c.r, c.g, c.b, ink.width.max(1.0)],
+                        params1: [ink.silhouette.max(0.001), if ink.crease > 0.0 { ink.crease } else { 1e6 }, ink.fade_distance, 0.0],
+                    };
+                    device.cmd_push_constants(
+                        cb,
+                        self.pipelines.ink_layout,
+                        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                        0,
+                        bytemuck::bytes_of(&push),
+                    );
+                    device.cmd_draw(cb, 3, 1, 0, 0);
+                    device.cmd_end_rendering(cb);
+                }
                 barrier(&device, cb, target.color.image, vk::ImageAspectFlags::COLOR, 0, 1, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
             }
 
@@ -1121,7 +1242,7 @@ impl Renderer {
     }
 }
 
-fn view_uniforms(v: &RenderView, sky: &Sky) -> ViewUniforms {
+fn view_uniforms(v: &RenderView, sky: &Sky, size: vk::Extent2D) -> ViewUniforms {
     let l = &v.lighting;
     // Cascades from the camera near plane to the shadow distance.
     let (z, w) = (v.proj.z_axis.z, v.proj.w_axis.z);
@@ -1149,6 +1270,7 @@ fn view_uniforms(v: &RenderView, sky: &Sky) -> ViewUniforms {
         shadow_texel: cascades.texel,
         shadow_params: [if shadows_on { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0],
         cam_forward: fwd.extend(0.0).to_array(),
+        screen: [size.width as f32, size.height as f32, 1.0 / size.width.max(1) as f32, 1.0 / size.height.max(1) as f32],
     }
 }
 
@@ -1250,6 +1372,9 @@ impl Drop for Renderer {
         for (_, t) in std::mem::take(&mut self.targets) {
             self.ctx.destroy_image(t.color);
             self.ctx.destroy_image(t.depth);
+        }
+        for (_, s) in std::mem::take(&mut self.custom_shaders) {
+            Pipelines::destroy_variants(&self.ctx, s.pipelines);
         }
         for (_, t) in std::mem::take(&mut self.egui_textures) {
             if let Some(i) = t.image {

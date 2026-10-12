@@ -7,7 +7,7 @@
 use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Time};
 use dumb_ecs::{SceneData, World};
-use dumb_render::{camera_view, extract_world, find_primary_camera, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
+use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
 use dumb_runtime::{feed_input, simulate, Project};
 use dumb_script::ScriptHost;
 use std::sync::Arc;
@@ -152,12 +152,14 @@ impl ApplicationHandler for App {
                 g.renderer.resize_target(g.target, size.width.max(1), size.height.max(1));
                 let mut view = RenderView::new(g.target);
                 let aspect = size.width.max(1) as f32 / size.height.max(1) as f32;
-                if let Some((v, p, pos, clear, sky)) = find_primary_camera(&g.world).and_then(|c| camera_view(&g.world, c, aspect)) {
+                let cam = find_primary_camera(&g.world);
+                if let Some((v, p, pos, clear, sky)) = cam.and_then(|c| camera_view(&g.world, c, aspect)) {
                     view.sky = sky;
                     view.view = v;
                     view.proj = p;
                     view.camera_pos = pos;
                     view.clear_color = clear;
+                    view.ink = cam.and_then(|c| camera_ink(&g.world, c));
                 }
                 view.time = g.time.elapsed as f32;
                 let _extract = dumb_core::profiler::Scope::new("extract");

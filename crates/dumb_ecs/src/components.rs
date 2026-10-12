@@ -244,7 +244,31 @@ pub struct PrefabInstance {
     pub prefab: AssetId,
 }
 
+/// Ink outlines (comic look) for the camera it's on: dark lines drawn over the image where
+/// objects end (silhouettes) and where surfaces fold sharply (creases).
+#[derive(Component, Editor, Clone, Debug)]
+pub struct InkOutline {
+    pub enabled: bool,
+    #[editor(color)]
+    pub color: Color,
+    #[editor(range = 1.0..=8.0, tooltip = "Line width in pixels")]
+    pub width: f32,
+    #[editor(range = 0.005..=0.5, tooltip = "Relative depth jump that draws a silhouette line (smaller = more lines)")]
+    pub silhouette: f32,
+    #[editor(range = 0.0..=1.0, tooltip = "How sharply a surface must fold to draw a crease line (smaller = more lines, 0 = off)")]
+    pub crease: f32,
+    #[editor(range = 0.0..=20000.0, tooltip = "Lines fade out up to this distance (0 = never)")]
+    pub fade_distance: f32,
+}
+
+impl Default for InkOutline {
+    fn default() -> Self {
+        InkOutline { enabled: true, color: Color::rgb(0.02, 0.02, 0.03), width: 2.0, silhouette: 0.04, crease: 0.08, fade_distance: 0.0 }
+    }
+}
+
 pub(crate) fn register_builtin(w: &mut World) {
+    w.register_type::<InkOutline>();
     w.register_type::<Name>();
     w.register_type::<Transform>();
     w.register_type::<Parent>();

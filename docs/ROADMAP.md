@@ -59,6 +59,6 @@ simulation):
 - ✅ Packaging: File ▸ Build & Export makes a standalone game folder (player, scripts, assets,
   Blender conversions). Still to do: asset bundles / cooked binary formats.
 - GPU picking (ID buffer) and selection outlines.
-- Material graphs and a shader hot-reload path for user WGSL.
+- ✅ User WGSL surface shaders: per-material shader assets compiled at runtime with hot reload, a shader viewer, WGSL in the code editor, and an ink-outline post effect. Next: material graphs and user post-process shaders.
 - a list of all changes made, user can undo the last or any of the actions 
 

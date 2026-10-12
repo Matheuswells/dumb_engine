@@ -8,6 +8,7 @@ static MESH_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/mesh.spv"));
 static LINE_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/line.spv"));
 static EGUI_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/egui.spv"));
 static SKY_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sky.spv"));
+static INK_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ink.spv"));
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct MeshVariant {
@@ -29,6 +30,9 @@ pub struct Pipelines {
     pub shadow: vk::Pipeline,
     pub egui: vk::Pipeline,
     pub egui_format: vk::Format,
+    /// Ink outlines post effect: sets = view, material (unused), depth texture (egui layout).
+    pub ink_layout: vk::PipelineLayout,
+    pub ink: vk::Pipeline,
 }
 
 struct Desc<'a> {
@@ -115,6 +119,29 @@ fn attr(location: u32, format: vk::Format, offset: u32) -> vk::VertexInputAttrib
     vk::VertexInputAttributeDescription { location, binding: 0, format, offset }
 }
 
+fn mesh_vertex_layout() -> ([vk::VertexInputBindingDescription; 1], [vk::VertexInputAttributeDescription; 6]) {
+    let bindings = [vk::VertexInputBindingDescription {
+        binding: 0,
+        stride: std::mem::size_of::<dumb_asset::Vertex>() as u32,
+        input_rate: vk::VertexInputRate::VERTEX,
+    }];
+    let attrs = [
+        attr(0, vk::Format::R32G32B32_SFLOAT, 0),
+        attr(1, vk::Format::R32G32B32_SFLOAT, 12),
+        attr(2, vk::Format::R32G32_SFLOAT, 24),
+        attr(3, vk::Format::R32G32B32A32_SFLOAT, 32),
+        attr(4, vk::Format::R16G16B16A16_UINT, 48),
+        attr(5, vk::Format::R32G32B32A32_SFLOAT, 56),
+    ];
+    (bindings, attrs)
+}
+
+/// The pipeline for variant `v` from a set (wireframe falls back to fill when unsupported).
+pub fn pick_variant(set: &[(MeshVariant, vk::Pipeline)], v: MeshVariant) -> vk::Pipeline {
+    let v = if v.wireframe && !set.iter().any(|(m, _)| m.wireframe) { MeshVariant { wireframe: false, ..v } } else { v };
+    set.iter().find(|(m, _)| *m == v).map(|(_, p)| *p).unwrap_or(set[0].1)
+}
+
 impl Pipelines {
     pub fn new(ctx: &Context, material_layout: vk::DescriptorSetLayout, swapchain_format: vk::Format) -> Self {
         unsafe {
@@ -199,6 +226,15 @@ impl Pipelines {
                 )
                 .unwrap();
 
+            let ink_sets = [view_layout, material_layout, egui_layout];
+            let ink_layout = ctx
+                .device
+                .create_pipeline_layout(
+                    &vk::PipelineLayoutCreateInfo::default().set_layouts(&ink_sets).push_constant_ranges(&scene_push),
+                    None,
+                )
+                .unwrap();
+
             let mut p = Pipelines {
                 view_layout,
                 egui_layout,
@@ -211,6 +247,8 @@ impl Pipelines {
                 shadow: vk::Pipeline::null(),
                 egui: vk::Pipeline::null(),
                 egui_format: swapchain_format,
+                ink_layout,
+                ink: vk::Pipeline::null(),
             };
             p.build_all(ctx);
             p
@@ -243,50 +281,31 @@ impl Pipelines {
             },
         );
 
-        let mesh_bindings = [vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: std::mem::size_of::<dumb_asset::Vertex>() as u32,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }];
-        let mesh_attrs = [
-            attr(0, vk::Format::R32G32B32_SFLOAT, 0),
-            attr(1, vk::Format::R32G32B32_SFLOAT, 12),
-            attr(2, vk::Format::R32G32_SFLOAT, 24),
-            attr(3, vk::Format::R32G32B32A32_SFLOAT, 32),
-            attr(4, vk::Format::R16G16B16A16_UINT, 48),
-            attr(5, vk::Format::R32G32B32A32_SFLOAT, 56),
-        ];
-        for double_sided in [false, true] {
-            for wireframe in [false, true] {
-                for blend in [false, true] {
-                    if wireframe && !ctx.wireframe_supported {
-                        continue;
-                    }
-                    let v = MeshVariant { double_sided, wireframe, blend };
-                    let pipe = build(
-                        ctx,
-                        &Desc {
-                            module: mesh_mod,
-                            layout: self.scene_layout,
-                            bindings: &mesh_bindings,
-                            attributes: &mesh_attrs,
-                            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-                            cull: if double_sided || wireframe { vk::CullModeFlags::NONE } else { vk::CullModeFlags::BACK },
-                            polygon: if wireframe { vk::PolygonMode::LINE } else { vk::PolygonMode::FILL },
-                            depth_test: true,
-                            depth_write: !blend,
-                            blend,
-                            color_format: Some(COLOR_FORMAT),
-                            depth_format: Some(DEPTH_FORMAT),
-                            vs: c"vs_main",
-                            fs: c"fs_main",
-                            depth_bias: false,
-                        },
-                    );
-                    self.mesh.push((v, pipe));
-                }
-            }
-        }
+        self.mesh = self.mesh_variants(ctx, mesh_mod);
+        let (mesh_bindings, mesh_attrs) = mesh_vertex_layout();
+
+        let ink_mod = ctx.shader_module(INK_SPV);
+        self.ink = build(
+            ctx,
+            &Desc {
+                module: ink_mod,
+                layout: self.ink_layout,
+                bindings: &[],
+                attributes: &[],
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                cull: vk::CullModeFlags::NONE,
+                polygon: vk::PolygonMode::FILL,
+                depth_test: false,
+                depth_write: false,
+                blend: true,
+                color_format: Some(COLOR_FORMAT),
+                depth_format: None,
+                vs: c"vs_ink",
+                fs: c"fs_ink",
+                depth_bias: false,
+            },
+        );
+        unsafe { ctx.device.destroy_shader_module(ink_mod, None) };
 
         self.shadow = build(
             ctx,
@@ -379,9 +398,53 @@ impl Pipelines {
         }
     }
 
+    /// Every mesh pipeline variant (culling, wireframe, blending) for a module with
+    /// `vs_main` / `fs_main`: the built-in shader or a user surface shader.
+    pub fn mesh_variants(&self, ctx: &Context, module: vk::ShaderModule) -> Vec<(MeshVariant, vk::Pipeline)> {
+        let (mesh_bindings, mesh_attrs) = mesh_vertex_layout();
+        let mut out = Vec::new();
+        for double_sided in [false, true] {
+            for wireframe in [false, true] {
+                for blend in [false, true] {
+                    if wireframe && !ctx.wireframe_supported {
+                        continue;
+                    }
+                    let v = MeshVariant { double_sided, wireframe, blend };
+                    let pipe = build(
+                        ctx,
+                        &Desc {
+                            module,
+                            layout: self.scene_layout,
+                            bindings: &mesh_bindings,
+                            attributes: &mesh_attrs,
+                            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                            cull: if double_sided || wireframe { vk::CullModeFlags::NONE } else { vk::CullModeFlags::BACK },
+                            polygon: if wireframe { vk::PolygonMode::LINE } else { vk::PolygonMode::FILL },
+                            depth_test: true,
+                            depth_write: !blend,
+                            blend,
+                            color_format: Some(COLOR_FORMAT),
+                            depth_format: Some(DEPTH_FORMAT),
+                            vs: c"vs_main",
+                            fs: c"fs_main",
+                            depth_bias: false,
+                        },
+                    );
+                    out.push((v, pipe));
+                }
+            }
+        }
+        out
+    }
+
     pub fn mesh_pipeline(&self, v: MeshVariant) -> vk::Pipeline {
-        let v = if v.wireframe && !self.mesh.iter().any(|(m, _)| m.wireframe) { MeshVariant { wireframe: false, ..v } } else { v };
-        self.mesh.iter().find(|(m, _)| *m == v).map(|(_, p)| *p).unwrap_or(self.mesh[0].1)
+        pick_variant(&self.mesh, v)
+    }
+
+    pub fn destroy_variants(ctx: &Context, set: Vec<(MeshVariant, vk::Pipeline)>) {
+        for (_, p) in set {
+            unsafe { ctx.device.destroy_pipeline(p, None) };
+        }
     }
 
     pub fn destroy(&mut self, ctx: &Context) {
@@ -394,6 +457,8 @@ impl Pipelines {
             ctx.device.destroy_pipeline(self.sky, None);
             ctx.device.destroy_pipeline(self.shadow, None);
             ctx.device.destroy_pipeline(self.egui, None);
+            ctx.device.destroy_pipeline(self.ink, None);
+            ctx.device.destroy_pipeline_layout(self.ink_layout, None);
             ctx.device.destroy_pipeline_layout(self.scene_layout, None);
             ctx.device.destroy_pipeline_layout(self.egui_pipeline_layout, None);
             ctx.device.destroy_descriptor_set_layout(self.view_layout, None);

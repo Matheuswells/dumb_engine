@@ -266,7 +266,7 @@ impl Ray {
 }
 
 /// Engine ABI tag. Script plugins built against a different engine/compiler are refused.
-pub const ENGINE_ABI: &str = concat!("dumb-engine/", env!("CARGO_PKG_VERSION"), "/abi-7");
+pub const ENGINE_ABI: &str = concat!("dumb-engine/", env!("CARGO_PKG_VERSION"), "/abi-8");
 
 /// Fixed ids of built-in assets (procedural primitives, default material).
 pub mod builtin {

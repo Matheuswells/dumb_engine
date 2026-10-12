@@ -282,9 +282,112 @@ impl Palette {
 }
 
 /// Build a highlighted layout. `marks` are byte ranges painted with a background (search hits).
-pub fn layout(src: &str, font: FontId, pal: &Palette, marks: &[(std::ops::Range<usize>, Color32)], is_rust: bool) -> LayoutJob {
+/// Language of a buffer, for highlighting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lang {
+    Rust,
+    Wgsl,
+    Text,
+}
+
+const WGSL_KEYWORDS: &[&str] = &[
+    "fn", "let", "var", "const", "override", "struct", "alias", "enable", "requires", "diagnostic", "true", "false", "uniform", "storage", "read",
+    "write", "read_write", "function", "private", "workgroup", "push_constant",
+];
+const WGSL_CONTROL: &[&str] = &["if", "else", "for", "while", "loop", "break", "continue", "continuing", "return", "switch", "case", "default", "discard"];
+const WGSL_TYPES: &[&str] = &[
+    "bool", "f16", "f32", "i32", "u32", "vec2", "vec3", "vec4", "vec2f", "vec3f", "vec4f", "vec2i", "vec3i", "vec4i", "vec2u", "vec3u", "vec4u", "mat2x2",
+    "mat2x3", "mat2x4", "mat3x2", "mat3x3", "mat3x4", "mat4x2", "mat4x3", "mat4x4", "mat3x3f", "mat4x4f", "array", "atomic", "ptr", "sampler",
+    "sampler_comparison", "texture_1d", "texture_2d", "texture_2d_array", "texture_3d", "texture_cube", "texture_cube_array",
+    "texture_depth_2d", "texture_depth_2d_array", "texture_storage_2d", "texture_multisampled_2d",
+];
+
+/// WGSL tokens: comments, `@attributes`, numbers, keywords, types and function calls.
+pub fn tokenize_wgsl(src: &str) -> Vec<(std::ops::Range<usize>, Tok)> {
+    let b = src.as_bytes();
+    let n = b.len();
+    let mut out: Vec<(std::ops::Range<usize>, Tok)> = Vec::new();
+    let push = |r: std::ops::Range<usize>, t: Tok, out: &mut Vec<(std::ops::Range<usize>, Tok)>| {
+        if r.is_empty() {
+            return;
+        }
+        match out.last_mut() {
+            Some(last) if last.1 == t && last.0.end == r.start => last.0.end = r.end,
+            _ => out.push((r, t)),
+        }
+    };
+    let mut i = 0;
+    while i < n {
+        let c = b[i];
+        let start = i;
+        if c == b'/' && i + 1 < n && b[i + 1] == b'/' {
+            while i < n && b[i] != b'\n' {
+                i += 1;
+            }
+            push(start..i, Tok::Comment, &mut out);
+        } else if c == b'/' && i + 1 < n && b[i + 1] == b'*' {
+            let mut depth = 0;
+            while i < n {
+                if b[i] == b'/' && i + 1 < n && b[i + 1] == b'*' {
+                    depth += 1;
+                    i += 2;
+                } else if b[i] == b'*' && i + 1 < n && b[i + 1] == b'/' {
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            push(start..i.min(n), Tok::Comment, &mut out);
+        } else if c == b'@' {
+            i += 1;
+            while i < n && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            push(start..i, Tok::Attribute, &mut out);
+        } else if c.is_ascii_digit() || (c == b'.' && i + 1 < n && b[i + 1].is_ascii_digit()) {
+            while i < n && (b[i].is_ascii_alphanumeric() || b[i] == b'.' || ((b[i] == b'-' || b[i] == b'+') && matches!(b[i - 1], b'e' | b'E'))) {
+                i += 1;
+            }
+            push(start..i, Tok::Number, &mut out);
+        } else if c.is_ascii_alphabetic() || c == b'_' {
+            while i < n && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            let word = &src[start..i];
+            let next = src[i..].trim_start_matches([' ', '\t']).as_bytes().first().copied();
+            let t = if WGSL_CONTROL.contains(&word) {
+                Tok::Control
+            } else if WGSL_KEYWORDS.contains(&word) {
+                Tok::Keyword
+            } else if WGSL_TYPES.contains(&word) || word.chars().next().is_some_and(|ch| ch.is_uppercase()) {
+                Tok::Type
+            } else if next == Some(b'(') {
+                Tok::Function
+            } else {
+                Tok::Plain
+            };
+            push(start..i, t, &mut out);
+        } else {
+            // Punctuation and anything else, one char at a time (UTF-8 safe).
+            i += src[i..].chars().next().map_or(1, char::len_utf8);
+            let t = if c.is_ascii_punctuation() { Tok::Punct } else { Tok::Plain };
+            push(start..i, t, &mut out);
+        }
+    }
+    out
+}
+
+pub fn layout(src: &str, font: FontId, pal: &Palette, marks: &[(std::ops::Range<usize>, Color32)], lang: Lang) -> LayoutJob {
     let mut job = LayoutJob::default();
-    let spans = if is_rust { tokenize(src) } else { vec![(0..src.len(), Tok::Plain)] };
+    let spans = match lang {
+        Lang::Rust => tokenize(src),
+        Lang::Wgsl => tokenize_wgsl(src),
+        Lang::Text => vec![(0..src.len(), Tok::Plain)],
+    };
     for (r, t) in spans {
         // Split spans at mark boundaries so marks get their own background.
         let mut cuts = vec![r.start, r.end];

@@ -32,6 +32,8 @@ struct Buffer {
     saved: String,
     mtime: Option<SystemTime>,
     is_rust: bool,
+    /// A surface shader: WGSL highlighting and live compile errors.
+    is_wgsl: bool,
     changes: Vec<(usize, LineChange)>,
     changed_on_disk: bool,
     scroll_to_line: Option<usize>,
@@ -50,6 +52,7 @@ impl Buffer {
             text,
             mtime: mtime(path),
             is_rust: path.extension().is_some_and(|e| e == "rs"),
+            is_wgsl: path.extension().is_some_and(|e| e == "wgsl"),
             changes: Vec::new(),
             changed_on_disk: false,
             scroll_to_line: None,
@@ -886,7 +889,7 @@ impl CodeEditor {
         let runtime_logs = if highlight_logs { self.logs_for(i) } else { Vec::new() };
 
         let b = &mut self.buffers[i];
-        let is_rust = b.is_rust;
+        let lang = if b.is_rust { highlight::Lang::Rust } else if b.is_wgsl { highlight::Lang::Wgsl } else { highlight::Lang::Text };
         let mut cache = b.job_cache.take();
         let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap: f32| {
             let s = text.as_str();
@@ -903,7 +906,7 @@ impl CodeEditor {
             let job = match &cache {
                 Some((k, j)) if *k == key => j.clone(),
                 _ => {
-                    let mut j = highlight::layout(s, font.clone(), &pal, &marks, is_rust);
+                    let mut j = highlight::layout(s, font.clone(), &pal, &marks, lang);
                     j.wrap.max_width = f32::INFINITY;
                     cache = Some((key, j.clone()));
                     j
@@ -1545,7 +1548,7 @@ impl CodeEditor {
                 ui.separator();
                 ui.weak(format!("{lines} lines · {} chars", b.text.chars().count()));
                 ui.separator();
-                ui.weak(if b.is_rust { "Rust" } else { "Text" });
+                ui.weak(if b.is_rust { "Rust" } else if b.is_wgsl { "WGSL" } else { "Text" });
                 ui.weak("UTF-8 · LF · spaces: 4");
                 if self.git.root.is_some() {
                     ui.separator();
@@ -1802,7 +1805,7 @@ impl CodeEditor {
         // Re-check a buffer once typing has paused for CHECK_DELAY.
         let now = Instant::now();
         for b in &self.buffers {
-            if !b.is_rust {
+            if !b.is_rust && !b.is_wgsl {
                 continue;
             }
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1819,6 +1822,11 @@ impl CodeEditor {
             }
             if entry.1.elapsed().as_secs_f32() < CHECK_DELAY {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                continue;
+            }
+            if b.is_wgsl {
+                self.live.insert(b.path.clone(), syntax::check_wgsl(&b.text));
+                self.checked.insert(b.path.clone(), (h, now));
                 continue;
             }
             self.live.insert(b.path.clone(), syntax::check(&b.text));

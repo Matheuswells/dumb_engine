@@ -7,6 +7,7 @@
 //! * Forward PBR with GPU skinning, frustum culling, debug lines, wireframe.
 
 mod assets;
+pub mod custom_shader;
 pub mod extract;
 mod pipelines;
 mod renderer;
@@ -14,7 +15,7 @@ pub mod shadows;
 mod types;
 mod vk;
 
-pub use extract::{camera_view, extract_world, find_primary_camera, push_model, screen_size, skeleton_lines, ExtractOptions};
+pub use extract::{camera_ink, camera_view, extract_world, find_primary_camera, push_model, screen_size, skeleton_lines, ExtractOptions};
 pub use renderer::{EguiFrame, Renderer};
 pub use types::*;
 
@@ -26,4 +27,6 @@ pub(crate) enum Garbage {
     Buffer(vk::Buffer),
     Target(vk::Image, vk::Image, ash::vk::DescriptorSet),
     EguiTexture(Option<vk::Image>, ash::vk::DescriptorSet),
+    /// Pipelines of a recompiled custom shader.
+    Pipelines(Vec<ash::vk::Pipeline>),
 }

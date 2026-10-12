@@ -50,6 +50,12 @@ fn mouse_from_name(s: &str) -> Option<dumb_core::MouseButton> {
     }
 }
 
+/// Compile errors of a shader source, as JSON (empty array when it compiles).
+fn shader_errors_json(source: &str) -> Json {
+    let errors = dumb_render::custom_shader::check(source);
+    Json::Array(errors.into_iter().map(|e| json!({ "line": e.line, "column": e.column, "message": e.message })).collect())
+}
+
 fn r3(v: f32) -> f64 {
     (v as f64 * 1000.0).round() / 1000.0
 }
@@ -841,6 +847,45 @@ impl Editor {
                 dumb_reflect::apply(&mut m, &val);
                 self.db.set_material(id, m.clone())?;
                 ok(json!({ "material": asset_json(id, &self.db), "values": reflect_to_json(&m, &self.db) }))
+            })(),
+            "create_shader" => (|| {
+                let name = a.req_str("name")?.trim().trim_end_matches(".wgsl").replace(['/', '\\', ':'], "_");
+                if name.is_empty() {
+                    return Err("`name` is empty".into());
+                }
+                let folder = a.str("folder")?.unwrap_or("Shaders").trim_matches('/').to_string();
+                let source = a.str("source")?.unwrap_or(dumb_render::custom_shader::TEMPLATE).to_string();
+                let prefix = if folder.is_empty() { String::new() } else { format!("{folder}/") };
+                let mut rel = format!("{prefix}{name}.wgsl");
+                let mut n = 1;
+                while self.db.assets_root.join(&rel).exists() {
+                    rel = format!("{prefix}{name} {n}.wgsl");
+                    n += 1;
+                }
+                let id = self.db.write_asset(&rel, &source)?;
+                ok(json!({ "shader": asset_json(id, &self.db), "errors": shader_errors_json(&source) }))
+            })(),
+            "get_shader" => (|| {
+                let id = self.asset(a, "shader")?;
+                let source = self.db.read_asset_text(id).ok_or("not a readable shader file")?;
+                ok(json!({
+                    "shader": asset_json(id, &self.db),
+                    "source": source,
+                    "errors": shader_errors_json(&source),
+                    "api": dumb_render::custom_shader::TEMPLATE.lines().take_while(|l| l.starts_with("//")).collect::<Vec<_>>().join("\n"),
+                }))
+            })(),
+            "set_shader" => (|| {
+                let id = self.asset(a, "shader")?;
+                if !self.db.entry(id).is_some_and(|e| e.kind == AssetKind::Shader) {
+                    return Err("not a .wgsl shader asset".into());
+                }
+                let source = a.req_str("source")?.to_string();
+                let path = self.db.abs_path(id).ok_or("shader has no file")?;
+                std::fs::write(&path, &source).map_err(|e| e.to_string())?;
+                // Recompile now instead of waiting for the file watcher.
+                self.db.reimport(id);
+                ok(json!({ "shader": asset_json(id, &self.db), "errors": shader_errors_json(&source) }))
             })(),
             "extract_material" => (|| {
                 let id = self.asset(a, "material")?;

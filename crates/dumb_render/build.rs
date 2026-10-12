@@ -4,10 +4,20 @@ use std::path::PathBuf;
 
 fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    for name in ["mesh", "line", "egui", "sky"] {
+    // (output name, source files concatenated in order)
+    let shaders: [(&str, &[&str]); 5] = [
+        ("mesh", &["common", "mesh"]),
+        ("ink", &["common", "ink"]),
+        ("line", &["line"]),
+        ("egui", &["egui"]),
+        ("sky", &["sky"]),
+    ];
+    for name in ["common", "mesh", "ink", "line", "egui", "sky", "surface"] {
+        println!("cargo:rerun-if-changed=shaders/{name}.wgsl");
+    }
+    for (name, parts) in shaders {
         let path = format!("shaders/{name}.wgsl");
-        println!("cargo:rerun-if-changed={path}");
-        let src = std::fs::read_to_string(&path).unwrap();
+        let src: String = parts.iter().map(|p| std::fs::read_to_string(format!("shaders/{p}.wgsl")).unwrap() + "\n").collect();
         let module = match naga::front::wgsl::parse_str(&src) {
             Ok(m) => m,
             Err(e) => panic!("{}", e.emit_to_string_with_path(&src, &path)),

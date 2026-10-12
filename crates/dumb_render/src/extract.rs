@@ -185,6 +185,12 @@ pub fn camera_view(world: &World, e: Entity, aspect: f32) -> Option<(Mat4, Mat4,
     Some((view, cam.projection_matrix(aspect), pos, cam.clear_color, cam.background == dumb_ecs::CameraBackground::Skybox))
 }
 
+/// Ink outline settings of a camera entity (its enabled `InkOutline` component).
+pub fn camera_ink(world: &World, e: Entity) -> Option<InkSettings> {
+    let ink = world.get::<dumb_ecs::InkOutline>(e).filter(|i| i.enabled)?;
+    Some(InkSettings { color: ink.color, width: ink.width, silhouette: ink.silhouette, crease: ink.crease, fade_distance: ink.fade_distance })
+}
+
 /// First camera marked primary (or any camera).
 pub fn find_primary_camera(world: &World) -> Option<Entity> {
     let mut any = None;

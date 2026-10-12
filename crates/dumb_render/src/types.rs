@@ -100,6 +100,28 @@ pub struct RenderView {
     pub lod_bias: f32,
     /// Sun shadows (cascaded shadow maps) for this view.
     pub shadows: bool,
+    /// Ink outlines drawn over the image (comic look). `None` = off.
+    pub ink: Option<InkSettings>,
+}
+
+/// Ink outline post effect: dark lines at silhouettes and sharp creases.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InkSettings {
+    pub color: Color,
+    /// Line width in pixels.
+    pub width: f32,
+    /// Relative depth jump that draws a silhouette line (smaller = more lines).
+    pub silhouette: f32,
+    /// How sharply a surface must fold to draw a crease line (smaller = more lines, 0 = off).
+    pub crease: f32,
+    /// Lines fade out up to this distance from the camera (0 = never).
+    pub fade_distance: f32,
+}
+
+impl Default for InkSettings {
+    fn default() -> Self {
+        InkSettings { color: Color::rgb(0.02, 0.02, 0.03), width: 2.0, silhouette: 0.04, crease: 0.08, fade_distance: 0.0 }
+    }
 }
 
 impl RenderView {
@@ -121,6 +143,7 @@ impl RenderView {
             lod_override: None,
             lod_bias: 1.0,
             shadows: true,
+            ink: None,
         }
     }
 

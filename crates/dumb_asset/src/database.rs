@@ -254,6 +254,8 @@ pub struct AssetDatabase {
     models: HashMap<AssetId, Arc<ModelData>>,
     textures: HashMap<AssetId, Arc<TextureData>>,
     materials: HashMap<AssetId, MaterialData>,
+    /// Versions of in-memory materials that have no file (editor previews).
+    virtual_versions: HashMap<AssetId, u64>,
     job_tx: Sender<JobResult>,
     job_rx: Receiver<JobResult>,
     _watcher: Option<notify::RecommendedWatcher>,
@@ -331,6 +333,7 @@ impl AssetDatabase {
             models: HashMap::new(),
             textures: HashMap::new(),
             materials: HashMap::new(),
+            virtual_versions: HashMap::new(),
             job_tx,
             job_rx,
             fs_rx: watcher.as_ref().map(|_| fs_rx),
@@ -452,7 +455,7 @@ impl AssetDatabase {
             AssetKind::Material => std::fs::read_to_string(&path)
                 .ok()
                 .and_then(|s| MaterialData::from_ron(&s).ok())
-                .map(|m| m.textures().into_iter().filter(|t| !t.is_none()).map(|t| self.resolve_parent(t)).collect())
+                .map(|m| m.textures().into_iter().chain([m.shader]).filter(|t| !t.is_none()).map(|t| self.resolve_parent(t)).collect())
                 .unwrap_or_default(),
             AssetKind::Scene | AssetKind::Prefab => std::fs::read_to_string(&path)
                 .ok()
@@ -516,7 +519,18 @@ impl AssetDatabase {
     /// Asset version; sub-assets report their parent's version.
     pub fn version(&self, id: AssetId) -> u64 {
         let id = self.resolve_parent(id);
-        self.entries.get(&id).map_or(0, |e| e.version)
+        self.entries.get(&id).map(|e| e.version).or_else(|| self.virtual_versions.get(&id).copied()).unwrap_or(0)
+    }
+
+    /// Set an in-memory material with no file, e.g. an editor preview. Renderers pick up each
+    /// change like an edit of a `.mat` asset.
+    pub fn set_virtual_material(&mut self, id: AssetId, m: MaterialData) {
+        if self.materials.get(&id) == Some(&m) {
+            return;
+        }
+        let v = self.next_version();
+        self.materials.insert(id, m);
+        self.virtual_versions.insert(id, v);
     }
 
     /// Search by name. `t:model` / `t:texture` / ... filters by kind, `l:label` by label.

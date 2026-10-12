@@ -56,7 +56,7 @@ Any client that speaks Streamable HTTP works the same way.
 | Editor & project | `get_editor_state`, `list_recent_projects`, `open_project`, `create_project`, `close_project`, `get_project_settings`, `set_project_settings`, `get_editor_settings`, `set_editor_settings` |
 | Scenes | `list_scenes`, `new_scene`, `open_scene`, `activate_scene`, `close_scene`, `save_scene`, `save_all_scenes`, `set_startup_scene` |
 | Entities | `list_entities`, `get_entity`, `create_entity`, `spawn_asset`, `delete_entities`, `duplicate_entities`, `rename_entity`, `set_parent`, `set_transform`, `set_component`, `remove_component`, `list_component_types`, `select_entities`, `focus_entity`, `undo`, `redo` |
-| Prefabs & materials | `create_prefab`, `apply_prefab`, `assign_material`, `create_material`, `get_material`, `set_material`, `extract_material` |
+| Prefabs, materials & shaders | `create_prefab`, `apply_prefab`, `assign_material`, `create_material`, `get_material`, `set_material`, `extract_material`, `create_shader`, `get_shader`, `set_shader` (WGSL surface shaders; return compile errors) |
 | Assets & files | `list_assets`, `list_folders`, `get_asset`, `set_asset_meta` (import settings, labels, animation events), `reimport_asset`, `import_file`, `create_folder`, `move_asset`, `delete_asset`, `list_files`, `read_file`, `write_file` |
 | Scripts | `get_script_status`, `build_scripts`, `reload_scripts`, `unload_scripts`, `create_script`, `set_system_enabled`, `set_script_options` |
 | Play mode | `play`, `pause`, `stop`, `step`, `set_time_scale`, `send_input` |

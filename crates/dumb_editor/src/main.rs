@@ -17,6 +17,7 @@ mod prefs;
 mod profiler_window;
 mod project_manager;
 mod script_tools;
+mod shader_viewer;
 mod splash;
 mod updater;
 mod viewport;

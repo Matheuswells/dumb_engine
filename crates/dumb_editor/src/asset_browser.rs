@@ -191,6 +191,32 @@ pub fn browser_ui(
                 }
                 ui.close();
             }
+            if ui.button("✨ Shader").on_hover_text("New surface shader (WGSL), used by materials").clicked() {
+                let rel = unique_path(db, &st.folder, "New Shader", "wgsl");
+                match db.write_asset(&rel, dumb_render::custom_shader::TEMPLATE) {
+                    Ok(id) => {
+                        actions.push(Action::SelectAsset(id));
+                        actions.push(Action::OpenAsset(id));
+                    }
+                    Err(e) => st.error = Some(e),
+                }
+                ui.close();
+            }
+            if ui.button("🎨 Material with shader").on_hover_text("New shader plus a material that uses it").clicked() {
+                let shader_rel = unique_path(db, &st.folder, "New Shader", "wgsl");
+                match db.write_asset(&shader_rel, dumb_render::custom_shader::TEMPLATE) {
+                    Ok(shader) => {
+                        let rel = unique_path(db, &st.folder, "New Material", "mat");
+                        let mat = MaterialData { shader, ..Default::default() };
+                        match db.write_asset(&rel, &mat.to_ron()) {
+                            Ok(id) => actions.push(Action::SelectAsset(id)),
+                            Err(e) => st.error = Some(e),
+                        }
+                    }
+                    Err(e) => st.error = Some(e),
+                }
+                ui.close();
+            }
             if ui.button("📜 Script").on_hover_text("New Rust script in the project's Scripts crate").clicked() {
                 actions.push(Action::NewScript);
                 ui.close();

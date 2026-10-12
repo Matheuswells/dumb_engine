@@ -38,6 +38,19 @@ pub fn check(src: &str) -> Vec<LiveDiag> {
     }
 }
 
+/// Compile a surface shader the way the renderer does and report its errors.
+pub fn check_wgsl(src: &str) -> Vec<LiveDiag> {
+    dumb_render::custom_shader::check(src)
+        .into_iter()
+        .map(|e| {
+            let line = e.line.saturating_sub(1);
+            let col = e.column.saturating_sub(1);
+            let width = src.lines().nth(line).map_or(1, |l| l.chars().skip(col).take_while(|c| c.is_alphanumeric() || *c == '_').count().max(1));
+            LiveDiag { line, col, end_line: line, end_col: col + width, error: true, text: e.message, source: "wgsl" }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

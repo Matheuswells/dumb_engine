@@ -280,6 +280,39 @@ fn material_ui(
 ) -> bool {
     let mut c = false;
 
+    c |= header(ui, "shader", "Shader", |ui| {
+        let mut c = row(ui, "Shader", |ui| {
+            let names = |_e: dumb_core::Entity| String::new();
+            let mut ictx = InspectCtx { db, entity_name: &names, open_asset: None };
+            let ch = asset_picker(ui, &mut m.shader, Some("shader"), &mut ictx, egui::Id::new("mat_shader"), !ui.is_enabled());
+            if let Some(a) = ictx.open_asset {
+                actions.push(Action::OpenAsset(a));
+            }
+            ch
+        });
+        if m.shader.is_none() {
+            ui.weak("Standard PBR. Pick a .wgsl shader (Create ▸ Shader) for custom looks.");
+        } else {
+            ui.horizontal(|ui| {
+                if ui.button("✨ Open shader").clicked() {
+                    actions.push(Action::OpenAsset(m.shader));
+                }
+                match renderer.shader_errors(m.shader) {
+                    Some([]) => {
+                        ui.colored_label(egui::Color32::from_rgb(110, 200, 120), "✔ compiled");
+                    }
+                    Some(errors) => {
+                        ui.colored_label(egui::Color32::from_rgb(240, 110, 100), format!("✖ {} error(s)", errors.len()))
+                            .on_hover_text(errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"));
+                    }
+                    None => {}
+                }
+            });
+            c |= crate::shader_viewer::shader_params_ui(ui, &mut m.shader_params0, &mut m.shader_params1);
+        }
+        c
+    });
+
     c |= header(ui, "surface", "Surface", |ui| {
         let mut c = texture_slot(ui, "albedo", &mut m.albedo_texture, db, renderer, thumbs, actions);
         c |= row(ui, "Color", |ui| color(ui, &mut m.albedo, true));
