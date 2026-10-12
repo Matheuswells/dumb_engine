@@ -254,6 +254,8 @@ pub struct Editor {
     mcp_waiting: Vec<mcp_tools::Waiting>,
     /// Frames still to step for the MCP `step` tool.
     mcp_steps: u32,
+    /// Help ▸ Check for Updates (GitHub releases).
+    updater: crate::updater::Updater,
 }
 
 pub fn apply_style(ctx: &egui::Context, theme: Theme) {
@@ -347,7 +349,11 @@ impl Editor {
             streamer: None,
             mcp_waiting: Vec::new(),
             mcp_steps: 0,
+            updater: Default::default(),
         };
+        if ed.settings.check_for_updates {
+            ed.updater.check(true);
+        }
 
         // Scripts first, so scene components resolve on load.
         let mut no_worlds: [&mut World; 0] = [];
@@ -1226,6 +1232,14 @@ impl Editor {
         if let Some(dir) = self.new_project.ui(&ctx) {
             self.request(ProjectRequest::Open(dir));
         }
+        let update = self.updater.ui(&ctx, &mut self.settings.check_for_updates);
+        if update.settings_changed {
+            self.settings.save();
+        }
+        if update.restart {
+            // Goes through the unsaved-changes prompt; main() starts the new editor on exit.
+            self.request(ProjectRequest::Quit);
+        }
         self.quit_dialog(&ctx);
         self.apply_actions(renderer);
     }
@@ -1535,6 +1549,13 @@ impl Editor {
                 self.splash_requested = true;
                 ui.close();
             }
+            if ui.button("⬆ Check for Updates…").clicked() {
+                self.updater.open = true;
+                if matches!(self.updater.state(), crate::updater::State::Idle | crate::updater::State::UpToDate | crate::updater::State::Failed(_)) {
+                    self.updater.check(false);
+                }
+                ui.close();
+            }
             ui.separator();
             ui.label("Viewport: RMB+WASD/QE fly · MMB pan · Alt+LMB orbit · wheel zoom · F focus");
             ui.label("Gizmos: W move · E rotate · R scale · hold Ctrl to snap");
@@ -1678,6 +1699,13 @@ impl Editor {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some((tag, installed)) = self.updater.pending() {
+                    let text = if installed { format!("⟳ Restart to use {tag}") } else { format!("⬆ Update to {tag}") };
+                    if ui.link(egui::RichText::new(text).color(egui::Color32::from_rgb(120, 180, 255))).clicked() {
+                        self.updater.open = true;
+                    }
+                    ui.separator();
+                }
                 let act = crate::mcp::activity();
                 if self.settings.mcp_enabled && act.active_within(std::time::Duration::from_secs(10)) {
                     let last = act.calls.front().map_or(String::new(), |c| format!(" · {}", c.tool));

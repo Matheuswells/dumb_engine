@@ -33,3 +33,9 @@ tiny_http = "0.12"
 base64 = "0.22"
 image.workspace = true
 uuid.workspace = true
+# Updater: download the latest GitHub release bundle and install it in place.
+ureq = "3.4.2"
+zip = { version = "9.0.2", default-features = false, features = ["deflate-flate2"] }
+tar = "0.4.46"
+flate2 = "1.1.10"
+semver = "1.0.28"

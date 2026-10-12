@@ -175,6 +175,13 @@ Windows and Linux bundles and publishes them as a GitHub release with generated 
 PowerShell blocks the script, run
 `powershell -ExecutionPolicy Bypass -File tools\release.ps1 0.2.0`.
 
+Installed bundles update themselves: the editor checks GitHub for a newer release when it
+starts (turn this off in the Updates window), and **Help ▸ Check for Updates…** downloads
+the bundle for your platform and installs it in place. The sample `project/` folder and
+files the bundle doesn't ship are kept. The replaced files are saved in `.update/backup`
+until the next update. After the restart, press **Build scripts** once, because game scripts must
+be rebuilt against the new engine. A source checkout updates with `git pull` instead.
+
 A bundle contains `dumb-editor`, `dumb-player`, the sample project and the engine sources,
 because game scripts compile against them. It also has a `rust-toolchain.toml` that pins the
 compiler the editor was built with, and the editor builds scripts with that compiler (rustup

@@ -18,6 +18,7 @@ mod profiler_window;
 mod project_manager;
 mod script_tools;
 mod splash;
+mod updater;
 mod viewport;
 mod web_browser;
 mod widgets;
@@ -334,6 +335,8 @@ impl ApplicationHandler for App {
 
 fn main() {
     let log = console::LogBuffer::install();
+    let user_toolchain = std::env::var_os("RUSTUP_TOOLCHAIN");
+    updater::startup();
     dumb_runtime::pin_rust_toolchain();
     // An explicit path wins; otherwise reopen the last project, or show the start screen.
     let project_dir = std::env::args().nth(1).map(PathBuf::from).or_else(project_manager::last_project);
@@ -341,4 +344,7 @@ fn main() {
     el.set_control_flow(ControlFlow::Poll);
     let mut app = App { project_dir, log, running: None };
     el.run_app(&mut app).expect("event loop failed");
+    // Free the window, GPU and MCP port before an updated editor takes over.
+    drop(app);
+    updater::restart_if_requested(user_toolchain);
 }

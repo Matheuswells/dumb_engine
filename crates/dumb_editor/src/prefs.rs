@@ -58,6 +58,9 @@ pub struct EditorSettings {
     /// Serve MCP tools on localhost so AI agents can drive the editor.
     pub mcp_enabled: bool,
     pub mcp_port: u16,
+    // Updates
+    /// Look for a newer GitHub release when the editor starts (release bundles only).
+    pub check_for_updates: bool,
 }
 
 impl Default for EditorSettings {
@@ -90,6 +93,7 @@ impl Default for EditorSettings {
             clear_console_on_play: true,
             mcp_enabled: true,
             mcp_port: crate::mcp::DEFAULT_PORT,
+            check_for_updates: true,
         }
     }
 }

@@ -51,6 +51,7 @@ Dumb Engine $tag ($platform)
 
 Requirements: a GPU with Vulkan 1.3. Blender is optional (for .blend/.fbx/.obj import).
 Keep this folder together: the editor compiles game scripts against crates/.
+Updates: Help > Check for Updates... installs new releases into this folder.
 Docs: README.md, docs/ (AI agents: docs/MCP.md).
 EOF
 
