@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dumb Engine</title>
+<meta name="description" content="A 3D game engine and editor in Rust on Vulkan, designed with minimal brainpower and maximum enthusiasm.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='6' width='20' height='20' rx='3' fill='%23ff6b3d'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f3ee;
+  --surface: #ffffff;
+  --surface-2: #efebe4;
+  --text: #1b1a17;
+  --muted: #5f5b53;
+  --border: #ddd7cc;
+  --accent: #e8521f;
+  --accent-ink: #ffffff;
+  --code-bg: #1d1c1a;
+  --code-text: #ece8e1;
+  --code-muted: #8f8a80;
+  --code-key: #ff8a5c;
+  --code-type: #7cc4ff;
+  --code-str: #a7d98b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121110;
+    --surface: #1b1a18;
+    --surface-2: #23211e;
+    --text: #efebe4;
+    --muted: #a39d92;
+    --border: #2f2c28;
+    --accent: #ff6b3d;
+    --accent-ink: #160b06;
+    --code-bg: #0c0b0a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121110;
+  --surface: #1b1a18;
+  --surface-2: #23211e;
+  --text: #efebe4;
+  --muted: #a39d92;
+  --border: #2f2c28;
+  --accent: #ff6b3d;
+  --accent-ink: #160b06;
+  --code-bg: #0c0b0a;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.6 "Space Grotesk", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+/* Nav */
+nav { border-bottom: 1px solid var(--border); }
+nav .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; }
+.logo i { width: 16px; height: 16px; background: var(--accent); border-radius: 3px; display: block; }
+nav ul { list-style: none; display: flex; gap: 20px; margin: 0 0 0 auto; padding: 0; font-size: 15px; }
+nav ul a { text-decoration: none; color: var(--muted); }
+nav ul a:hover { color: var(--text); }
+@media (max-width: 640px) { nav ul li:not(:last-child) { display: none; } }
+
+/* Hero */
+.hero { padding: 72px 0 56px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center; }
+@media (max-width: 860px) { .hero { grid-template-columns: 1fr; padding-top: 48px; } }
+.tag { display: inline-block; font: 600 12px/1 "JetBrains Mono", monospace; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 6px 10px; }
+h1 { font-size: clamp(44px, 7vw, 76px); line-height: 1; letter-spacing: -0.03em; margin: 20px 0 18px; }
+.lede { font-size: 20px; color: var(--muted); max-width: 34em; margin: 0 0 28px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: 10px; font-weight: 500;
+  text-decoration: none; border: 1px solid var(--border); background: var(--surface); }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.06); }
+
+/* The box that moves across the screen before losing interest */
+.screen { position: relative; aspect-ratio: 4 / 3; border-radius: 14px; overflow: hidden; border: 1px solid var(--border);
+  background: linear-gradient(180deg, #2b4a6b 0%, #6f8fae 55%, #3a3a36 55%, #2a2926 100%); }
+.screen::before { content: ""; position: absolute; inset: 55% 0 0; opacity: .35;
+  background: repeating-linear-gradient(90deg, transparent 0 39px, #ffffff22 39px 40px); }
+.screen .sun { position: absolute; width: 56px; height: 56px; border-radius: 50%; background: #ffd9a8; top: 14%; right: 14%; box-shadow: 0 0 60px #ffd9a8aa; }
+.screen .box { position: absolute; width: 18%; aspect-ratio: 1; bottom: 45%; left: 4%; background: var(--accent); border-radius: 4px;
+  box-shadow: inset -10px -10px 0 #0003; animation: wander 7s ease-in-out infinite; }
+.screen .bubble { position: absolute; bottom: 68%; left: 50%; font: 600 13px "JetBrains Mono", monospace; color: #fff;
+  background: #0008; padding: 4px 8px; border-radius: 6px; opacity: 0; animation: bored 7s ease-in-out infinite; white-space: nowrap; }
+.screen .hud { position: absolute; top: 10px; left: 12px; font: 12px "JetBrains Mono", monospace; color: #ffffffcc; }
+@keyframes wander {
+  0%   { left: 4%;  transform: translateY(0) rotate(0); }
+  45%  { left: 52%; transform: translateY(0) rotate(0); }
+  50%  { left: 54%; transform: translateY(-14%) rotate(-4deg); }
+  55%  { left: 54%; transform: translateY(0) rotate(0); }
+  80%  { left: 54%; transform: translateY(0) rotate(0); }
+  100% { left: 4%;  transform: translateY(0) rotate(0); }
+}
+@keyframes bored { 0%, 52% { opacity: 0; } 58%, 78% { opacity: 1; } 84%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .screen .box, .screen .bubble { animation: none; } .screen .box { left: 40%; } }
+
+/* Sections */
+section { padding: 56px 0; border-top: 1px solid var(--border); }
+h2 { font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.02em; margin: 0 0 8px; }
+.sub { color: var(--muted); margin: 0 0 32px; max-width: 40em; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.card h3 { margin: 0 0 6px; font-size: 18px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.card .k { font: 600 12px "JetBrains Mono", monospace; color: var(--accent); margin-bottom: 10px; display: block; }
+
+/* Code */
+pre { background: var(--code-bg); color: var(--code-text); border-radius: 12px; padding: 18px 20px; overflow-x: auto;
+  font-size: 14px; line-height: 1.6; margin: 0; }
+pre .c { color: var(--code-muted); }
+pre .k { color: var(--code-key); }
+pre .t { color: var(--code-type); }
+pre .s { color: var(--code-str); }
+.split { display: grid; grid-template-columns: 1fr 1.3fr; gap: 32px; align-items: start; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+.steps li { counter-increment: s; position: relative; padding-left: 40px; color: var(--muted); }
+.steps li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text); font: 600 13px/26px "JetBrains Mono", monospace; text-align: center; }
+.steps b { color: var(--text); font-weight: 500; }
+p code, li code, td code { background: var(--surface-2); padding: 1px 6px; border-radius: 5px; font-size: .88em; }
+
+.cmd { display: grid; gap: 10px; }
+.cmd pre { padding: 14px 18px; }
+
+/* Editor table */
+.table { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
+.row { display: grid; grid-template-columns: 180px 1fr; border-top: 1px solid var(--border); }
+.row:first-child { border-top: 0; }
+.row > div { padding: 14px 18px; font-size: 15px; }
+.row > div:first-child { font-weight: 500; background: var(--surface-2); }
+.row > div:last-child { color: var(--muted); }
+@media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+
+footer { border-top: 1px solid var(--border); padding: 32px 0 48px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#"><i></i>Dumb Engine</a>
+    <ul>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#start">Quick start</a></li>
+      <li><a href="#scripting">Scripting</a></li>
+      <li><a href="#editor">Editor</a></li>
+      <li><a href="https://github.com/Matheuswells/dumb_engine">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="wrap hero">
+  <div>
+    <span class="tag">Status: MVP</span>
+    <h1>The game engine for moving a box across the screen.</h1>
+    <p class="lede">Designed with minimal brainpower and maximum enthusiasm. Under the hood it's a 3D engine and
+      editor in Rust on Vulkan, with game code as plain Rust in a hot-reloadable DLL.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/Matheuswells/dumb_engine/releases/latest">Download latest release</a>
+      <a class="btn" href="https://github.com/Matheuswells/dumb_engine">View on GitHub</a>
+    </div>
+  </div>
+  <div class="screen" role="img" aria-label="An orange box slides across a 3D scene, hops once, and wanders back">
+    <span class="hud">dumb-player · 144 fps (probably)</span>
+    <span class="sun"></span>
+    <span class="box"></span>
+    <span class="bubble">ok i'm bored</span>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Features</h2>
+    <p class="sub">Some of them are even true.</p>
+    <div class="grid">
+      <div class="card"><span class="k">01</span><h3>Zero-Brain Architecture</h3><p>No complex setups. If a 5-year-old with a keyboard can't figure it out, we haven't dumbed it down enough.</p></div>
+      <div class="card"><span class="k">02</span><h3>Blazing Fast (Probably)</h3><p>So light on features that your CPU won't even notice it's running.</p></div>
+      <div class="card"><span class="k">03</span><h3>Advanced Physics</h3><p>Objects fall down. Sometimes they bounce. Don't push your luck.</p></div>
+      <div class="card"><span class="k">04</span><h3>Photorealistic-ish Graphics</h3><p>Supports pixels, colored rectangles, and severe artistic compromises.</p></div>
+    </div>
+
+    <p class="sub" style="margin-top:40px">And the parts that are actually serious:</p>
+    <div class="grid">
+      <div class="card"><span class="k">vulkan 1.3</span><h3>Rust + Vulkan renderer</h3><p>PBR, skinning, sky lighting and reflections. Shaders are WGSL, compiled by naga at build time, so no Vulkan SDK needed.</p></div>
+      <div class="card"><span class="k">hot reload</span><h3>Scripts are plain Rust</h3><p>One file per script in a DLL that reloads while the game runs. Components keep their values across rebuilds.</p></div>
+      <div class="card"><span class="k">blender</span><h3>Author in Blender</h3><p>Imports .blend, .fbx, .obj, .gltf and more automatically, with collision proxies, LODs and animations.</p></div>
+      <div class="card"><span class="k">rapier</span><h3>Physics</h3><p>Rigid bodies, colliders and a character controller, simulated at a fixed rate during Play.</p></div>
+      <div class="card"><span class="k">ecs</span><h3>Big worlds</h3><p>A sparse-set ECS built for very large worlds, procedural generation and simulation. The demo runs 90,000 entities.</p></div>
+      <div class="card"><span class="k">mcp</span><h3>AI agents can drive it</h3><p>A built-in MCP server with about 75 tools lets agents build levels, write scripts and play the game. Edits are undoable.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap split">
+    <div>
+      <h2>Quick start</h2>
+      <p class="sub">You need a Vulkan 1.3 GPU and a Rust toolchain. Blender is optional.</p>
+      <ol class="steps">
+        <li><b>Clone the repository</b> and open a terminal in it.</li>
+        <li><b>Run the editor.</b> It opens the sample project and its startup scene.</li>
+        <li><b>Press Build scripts</b> once on first run, then hit Play.</li>
+        <li><b>Or skip the editor</b> and run the standalone player.</li>
+      </ol>
+    </div>
+    <div class="cmd">
+      <pre><span class="c"># 1</span>
+git clone https://github.com/Matheuswells/dumb_engine.git
+cd dumb_engine</pre>
+      <pre><span class="c"># 2</span>
+cargo run -p dumb_editor -- project</pre>
+      <pre><span class="c"># 4</span>
+cargo run -p dumb_runtime --bin dumb-player -- project</pre>
+    </div>
+  </div>
+</section>
+
+<section id="scripting">
+  <div class="wrap split">
+    <div>
+      <h2>Scripting</h2>
+      <p class="sub">Each <code>.rs</code> file in <code>Scripts/src/</code> is one script. Nothing to register by hand.</p>
+      <ol class="steps">
+        <li><b>Pick a template:</b> Behaviour, Component, System or Empty.</li>
+        <li><b>Derive <code>Editor</code></b> and the inspector shows your fields, with ranges and tooltips.</li>
+        <li><b>Rebuild while playing.</b> The DLL reloads and every component keeps its values, even if you reorder fields.</li>
+      </ol>
+    </div>
+<pre><span class="k">use</span> dumb_script::prelude::*;
+
+<span class="k">#[derive(</span><span class="t">Component</span>, <span class="t">Editor</span>, <span class="t">Clone</span>, <span class="t">Default</span><span class="k">)]</span>
+<span class="k">pub struct</span> <span class="t">Player</span> {
+    <span class="k">#[editor(</span>range = 0.0..=20.0, tooltip = <span class="s">"Meters per second"</span><span class="k">)]</span>
+    <span class="k">pub</span> speed: <span class="t">f32</span>,
+}
+
+<span class="k">fn</span> movement(ctx: &amp;<span class="k">mut</span> <span class="t">ScriptContext</span>) {
+    <span class="k">let</span> dir = <span class="t">Vec3</span>::new(ctx.input.axis(<span class="t">Key</span>::A, <span class="t">Key</span>::D), 0.0,
+                        ctx.input.axis(<span class="t">Key</span>::W, <span class="t">Key</span>::S));
+    <span class="k">for</span> (t, p) <span class="k">in</span> ctx.world.query::&lt;(&amp;<span class="k">mut</span> <span class="t">Transform</span>, &amp;<span class="t">Player</span>)&gt;() {
+        t.translation += dir * p.speed * ctx.time.delta;
+    }
+}
+
+<span class="k">pub fn</span> register(reg: &amp;<span class="k">mut</span> <span class="t">Registry</span>) {
+    reg.component::&lt;<span class="t">Player</span>&gt;();
+    reg.system(<span class="s">"player::movement"</span>, movement);
+}</pre>
+  </div>
+</section>
+
+<section id="editor">
+  <div class="wrap">
+    <h2>The editor</h2>
+    <p class="sub">Everything you need to place a box, and a few things you don't.</p>
+    <div class="table">
+      <div class="row"><div>Scene</div><div>3D viewport, move/rotate/scale gizmos with snapping, picking, scene tabs, undo/redo, Play/Pause/Step/Stop that restores the exact pre-play scene.</div></div>
+      <div class="row"><div>Hierarchy</div><div>Virtualized tree that's fine with 100k entities, drag-and-drop reparenting, prefabs.</div></div>
+      <div class="row"><div>Inspector</div><div>Generated from reflection for engine and script components: asset pickers, entity references, enums, lists, colors.</div></div>
+      <div class="row"><div>Assets</div><div>Folder tree with real 3D thumbnails, search, import by drag-and-drop, dependencies, hot reload.</div></div>
+      <div class="row"><div>Viewers</div><div>Model viewer (meshes, bones, LODs, collision proxies), animation viewer with scrubbing and events, live material editor.</div></div>
+      <div class="row"><div>Scripts panel</div><div>Toggle systems while playing, per-system cost in ms, compiler problems that jump to the line in VS Code.</div></div>
+    </div>
+    <p class="sub" style="margin:28px 0 0">Read more in the
+      <a href="https://github.com/Matheuswells/dumb_engine/blob/main/docs/ARCHITECTURE.md">architecture notes</a>,
+      the <a href="https://github.com/Matheuswells/dumb_engine/blob/main/docs/MCP.md">MCP guide</a> and the
+      <a href="https://github.com/Matheuswells/dumb_engine/blob/main/docs/ROADMAP.md">roadmap</a>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Dumb Engine · MIT OR Apache-2.0</span>
+    <span>If it leaks memory, just restart your computer.</span>
+  </div>
+</footer>
+
+</body>
+</html>
