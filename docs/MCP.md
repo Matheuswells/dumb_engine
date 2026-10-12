@@ -11,8 +11,13 @@ scenes dirty.
 
 The server starts with the editor and listens on **`http://127.0.0.1:47100/mcp`**
 (Streamable HTTP). It only accepts connections from this computer, and browsers from other
-sites are refused. **Edit ▸ Preferences ▸ AI agents (MCP)** turns it on or off, changes the
-port and shows the setup command.
+sites are refused.
+
+The **MCP** menu in the menu bar shows whether the server is listening, which agent last
+connected and its recent tool calls. It also copies the Claude Code command or the server
+URL, and **Add .mcp.json to this project** writes the config into the open project.
+While an agent is working, the status bar shows **🔌 Agent active**.
+**Edit ▸ Preferences ▸ AI agents (MCP)** turns the server on or off and changes the port.
 
 Claude Code:
 

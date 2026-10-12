@@ -159,6 +159,8 @@ pub fn handle_message(msg: &Json, dispatch: &dyn Fn(&str, Map<String, Json>) -> 
     let params = msg.get("params").cloned().unwrap_or(Json::Null);
     let result = match method {
         "initialize" => {
+            let client = params.pointer("/clientInfo/name").and_then(Json::as_str).map(str::to_string);
+            super::note(|a| a.client = client.or(a.client.take()));
             let asked = params.get("protocolVersion").and_then(Json::as_str).unwrap_or("");
             let version = PROTOCOL_VERSIONS.iter().find(|v| **v == asked).unwrap_or(&PROTOCOL_VERSIONS[0]);
             json!({
@@ -168,7 +170,6 @@ pub fn handle_message(msg: &Json, dispatch: &dyn Fn(&str, Map<String, Json>) -> 
                 "instructions": INSTRUCTIONS,
             })
         }
-        "ping" => json!({}),
         "tools/list" => json!({ "tools": tools::definitions() }),
         "tools/call" => {
             let Some(name) = params.get("name").and_then(Json::as_str) else {
@@ -182,10 +183,21 @@ pub fn handle_message(msg: &Json, dispatch: &dyn Fn(&str, Map<String, Json>) -> 
                 Some(Json::Object(m)) => m.clone(),
                 Some(_) => return Some(error(id, -32602, "`arguments` must be an object")),
             };
-            match dispatch(name, args) {
+            let start = std::time::Instant::now();
+            let result = dispatch(name, args);
+            super::note(|a| {
+                a.calls.push_front(super::CallRecord { tool: name.to_string(), ok: result.is_ok(), at: start, took: start.elapsed() });
+                a.calls.truncate(super::RECENT_CALLS);
+                a.total += 1;
+            });
+            match result {
                 Ok(content) => json!({ "content": content.iter().map(Content::to_json).collect::<Vec<_>>(), "isError": false }),
                 Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
             }
+        }
+        "ping" => {
+            super::note(|_| {});
+            json!({})
         }
         _ => return Some(error(id, -32601, &format!("method `{method}` not found"))),
     };

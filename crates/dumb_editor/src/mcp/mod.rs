@@ -10,12 +10,17 @@ use serde_json::{json, Map, Value as Json};
 pub use server::{Call, Server};
 
 use crate::prefs::EditorSettings;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_PORT: u16 = 47100;
+/// Tool calls kept for the MCP menu.
+const RECENT_CALLS: usize = 12;
 
 static STATUS: Mutex<String> = Mutex::new(String::new());
+static ACTIVITY: Mutex<Activity> = Mutex::new(Activity { client: None, last_seen: None, calls: VecDeque::new(), total: 0 });
 
 /// One-line server state for the Preferences window.
 pub fn status() -> String {
@@ -25,6 +30,54 @@ pub fn status() -> String {
 fn set_status(s: String) {
     if let Ok(mut g) = STATUS.lock() {
         *g = s;
+    }
+}
+
+/// What agents have been doing, for the MCP menu.
+#[derive(Clone, Default)]
+pub struct Activity {
+    /// `clientInfo.name` from the last `initialize` (e.g. "claude-code").
+    pub client: Option<String>,
+    /// Last request of any kind.
+    pub last_seen: Option<Instant>,
+    /// Most recent tool calls, newest first.
+    pub calls: VecDeque<CallRecord>,
+    /// Tool calls since the editor started.
+    pub total: u64,
+}
+
+#[derive(Clone)]
+pub struct CallRecord {
+    pub tool: String,
+    pub ok: bool,
+    pub at: Instant,
+    pub took: Duration,
+}
+
+impl Activity {
+    /// An agent talked to the editor within `window`.
+    pub fn active_within(&self, window: Duration) -> bool {
+        self.last_seen.is_some_and(|t| t.elapsed() < window)
+    }
+}
+
+pub fn activity() -> Activity {
+    ACTIVITY.lock().map(|a| a.clone()).unwrap_or_default()
+}
+
+fn note(f: impl FnOnce(&mut Activity)) {
+    if let Ok(mut a) = ACTIVITY.lock() {
+        a.last_seen = Some(Instant::now());
+        f(&mut a);
+    }
+}
+
+/// "3 s ago", "2 min ago"...
+pub fn ago(t: Instant) -> String {
+    match t.elapsed().as_secs() {
+        s if s < 60 => format!("{s} s ago"),
+        s if s < 3600 => format!("{} min ago", s / 60),
+        s => format!("{} h ago", s / 3600),
     }
 }
 

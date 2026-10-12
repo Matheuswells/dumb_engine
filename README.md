@@ -152,7 +152,8 @@ editor, and its edits are undoable like your own.
 claude mcp add --transport http dumb-engine http://127.0.0.1:47100/mcp
 ```
 
-Turn it off or change the port in **Edit ▸ Preferences ▸ AI agents (MCP)**. See
+The **MCP** menu shows the server and agent status and recent tool calls, and copies the
+setup command. Turn it off or change the port in **Edit ▸ Preferences ▸ AI agents (MCP)**. See
 [docs/MCP.md](docs/MCP.md) for the tool list and conventions.
 
 ## Releasing

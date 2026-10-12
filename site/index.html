@@ -162,6 +162,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
       <li><a href="#start">Quick start</a></li>
       <li><a href="#scripting">Scripting</a></li>
       <li><a href="#editor">Editor</a></li>
+      <li><a href="#mcp">AI agents</a></li>
       <li><a href="https://github.com/Matheuswells/dumb_engine">GitHub</a></li>
     </ul>
   </div>
@@ -283,6 +284,44 @@ cargo run -p dumb_runtime --bin dumb-player -- project</pre>
       <a href="https://github.com/Matheuswells/dumb_engine/blob/main/docs/ARCHITECTURE.md">architecture notes</a>,
       the <a href="https://github.com/Matheuswells/dumb_engine/blob/main/docs/MCP.md">MCP guide</a> and the
       <a href="https://github.com/Matheuswells/dumb_engine/blob/main/docs/ROADMAP.md">roadmap</a>.</p>
+  </div>
+</section>
+
+<section id="mcp">
+  <div class="wrap">
+    <span class="tag">MCP</span>
+    <h2 style="margin-top:16px">Let an AI agent drive the editor</h2>
+    <p class="sub">The editor runs a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server, so
+      Claude Code, Claude Desktop or any MCP client can build levels, tune materials, write and hot-reload scripts,
+      play the game and look at screenshots. You watch every change happen live, and Ctrl+Z undoes it.</p>
+
+    <div class="split">
+      <div>
+        <ol class="steps">
+          <li><b>Open the editor.</b> The server starts with it, on this computer only.</li>
+          <li><b>Open the MCP menu</b> and choose <b>Copy Claude Code command</b>, or <b>Add .mcp.json to this project</b>.</li>
+          <li><b>Start a new Claude session</b> and ask for something. The status bar shows <code>🔌 Agent active</code> while it works.</li>
+        </ol>
+      </div>
+      <div class="cmd">
+        <pre><span class="c"># Claude Code</span>
+claude mcp add --transport http dumb-engine http://127.0.0.1:47100/mcp</pre>
+        <pre><span class="c"># or .mcp.json in your project</span>
+{ <span class="s">"mcpServers"</span>: { <span class="s">"dumb-engine"</span>: {
+    <span class="s">"type"</span>: <span class="s">"http"</span>, <span class="s">"url"</span>: <span class="s">"http://127.0.0.1:47100/mcp"</span> } } }</pre>
+      </div>
+    </div>
+
+    <p class="sub" style="margin:40px 0 16px">Things you can ask for:</p>
+    <div class="grid">
+      <div class="card"><span class="k">scenes</span><h3>"Build a small arena with a ramp and four lights."</h3><p>Creates entities, sets transforms and components, spawns assets and saves the scene.</p></div>
+      <div class="card"><span class="k">materials</span><h3>"Make the floor look like wet asphalt."</h3><p>Creates and edits materials, assigns them and checks the result with a screenshot.</p></div>
+      <div class="card"><span class="k">scripts</span><h3>"Add a double jump to the player."</h3><p>Writes the script, builds it, reads compiler errors, and hot-reloads the DLL.</p></div>
+      <div class="card"><span class="k">play mode</span><h3>"Play and tell me why the box falls through the floor."</h3><p>Plays, sends input, steps frames, reads the console and captures the game view.</p></div>
+    </div>
+    <p class="sub" style="margin:28px 0 0">About 75 tools cover scenes, entities, prefabs, materials, assets, scripts,
+      play mode, the console and exports. The full list is in the
+      <a href="https://github.com/Matheuswells/dumb_engine/blob/main/docs/MCP.md">MCP guide</a>.</p>
   </div>
 </section>
 

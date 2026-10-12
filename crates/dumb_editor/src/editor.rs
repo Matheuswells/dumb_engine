@@ -196,6 +196,10 @@ pub struct Editor {
     step_once: bool,
     input: Input,
     game_focused: bool,
+    /// The pointer was over the game view last frame (not covered by a window).
+    game_hovered: bool,
+    /// A mouse button went down over the game view and is still held.
+    game_captured: bool,
     gizmo: Gizmo,
     browser: BrowserState,
     console: ConsoleState,
@@ -299,6 +303,8 @@ impl Editor {
             step_once: false,
             input: Input::default(),
             game_focused: false,
+            game_hovered: false,
+            game_captured: false,
             gizmo: Gizmo::default(),
             browser: BrowserState::default(),
             console: ConsoleState::default(),
@@ -403,9 +409,31 @@ impl Editor {
     // ------------------------------------------------------------------ events
 
     pub fn on_window_event(&mut self, event: &winit::event::WindowEvent, _consumed: bool) {
-        if self.play == PlayMode::Playing && self.game_focused {
-            feed_input(&mut self.input, event);
+        use winit::event::{ElementState, WindowEvent};
+        if self.play != PlayMode::Playing || !self.game_focused {
+            self.game_captured = false;
+            return;
         }
+        // The mouse belongs to the game only over the game view (or while a drag that
+        // started there is held), so dragging in panels never moves the game's camera.
+        let over_game = self.game_hovered || self.game_captured;
+        match event {
+            WindowEvent::MouseInput { state: ElementState::Pressed, .. } if !self.game_hovered => {
+                // Clicking anywhere else in the editor hands input back to the editor.
+                self.game_focused = false;
+                self.input.clear();
+                return;
+            }
+            WindowEvent::MouseInput { state, .. } => self.game_captured = *state == ElementState::Pressed,
+            WindowEvent::CursorMoved { position, .. } if !over_game => {
+                // Track the cursor without a delta so re-entering the view doesn't jump.
+                self.input.mouse_pos = Vec2::new(position.x as f32, position.y as f32);
+                return;
+            }
+            WindowEvent::MouseWheel { .. } if !over_game => return,
+            _ => {}
+        }
+        feed_input(&mut self.input, event);
     }
 
     pub fn import_dropped(&mut self, path: &Path) {
@@ -1098,6 +1126,7 @@ impl Editor {
             self.style_dirty = false;
         }
         self.pointer_down = ctx.input(|i| i.pointer.any_down());
+        self.game_hovered = false; // set again by game_view when it is shown
         self.shortcuts(&ctx, renderer);
 
         egui::Panel::top("menu").show(ui, |ui| {
@@ -1500,6 +1529,7 @@ impl Editor {
                 ui.close();
             }
         });
+        ui.menu_button("MCP", |ui| self.mcp_menu(ui));
         ui.menu_button("Help", |ui| {
             if ui.button("🎬 Splash Screen").clicked() {
                 self.splash_requested = true;
@@ -1508,9 +1538,76 @@ impl Editor {
             ui.separator();
             ui.label("Viewport: RMB+WASD/QE fly · MMB pan · Alt+LMB orbit · wheel zoom · F focus");
             ui.label("Gizmos: W move · E rotate · R scale · hold Ctrl to snap");
-            ui.label("Play: Ctrl+P · Esc releases game input");
+            ui.label("Play: Ctrl+P · Esc or a click outside the game view releases game input");
             ui.label("Drop files onto the window to import them.");
         });
+    }
+
+    /// MCP menu: server state, connected agent, recent tool calls and setup helpers.
+    fn mcp_menu(&mut self, ui: &mut egui::Ui) {
+        let url = format!("http://127.0.0.1:{}/mcp", self.settings.mcp_port);
+        let status = crate::mcp::status();
+        let running = self.settings.mcp_enabled && status.starts_with("listening");
+        let act = crate::mcp::activity();
+
+        let (dot, text) = match (self.settings.mcp_enabled, running) {
+            (false, _) => (egui::Color32::GRAY, "Server off".to_string()),
+            (true, true) => (egui::Color32::from_rgb(110, 200, 120), format!("Listening on {url}")),
+            (true, false) => (egui::Color32::from_rgb(230, 90, 80), format!("Server {status}")),
+        };
+        ui.horizontal(|ui| {
+            ui.colored_label(dot, "●");
+            ui.label(text);
+        });
+        if running {
+            match (&act.client, act.last_seen) {
+                (_, None) => ui.weak("No agent has connected yet"),
+                (client, Some(t)) => ui.weak(format!("Agent: {} · last request {}", client.as_deref().unwrap_or("unknown client"), crate::mcp::ago(t))),
+            };
+        }
+        if ui.checkbox(&mut self.settings.mcp_enabled, "Let AI agents control the editor").changed() {
+            self.settings.save();
+        }
+
+        ui.separator();
+        ui.menu_button(format!("Recent tool calls ({})", act.total), |ui| {
+            if act.calls.is_empty() {
+                ui.weak("None yet");
+            }
+            for c in &act.calls {
+                ui.horizontal(|ui| {
+                    ui.colored_label(if c.ok { egui::Color32::from_rgb(110, 200, 120) } else { egui::Color32::from_rgb(230, 90, 80) }, if c.ok { "✔" } else { "✖" });
+                    ui.monospace(&c.tool);
+                    ui.weak(format!("{} ms · {}", c.took.as_millis(), crate::mcp::ago(c.at)));
+                });
+            }
+        });
+
+        ui.separator();
+        let claude = format!("claude mcp add --transport http dumb-engine {url}");
+        if ui.button("📋 Copy Claude Code command").on_hover_text(&claude).clicked() {
+            ui.ctx().copy_text(claude);
+            self.set_status("Copied. Paste it in a terminal, then start a new Claude session.");
+            ui.close();
+        }
+        if ui.button("📋 Copy server URL").on_hover_text(&url).clicked() {
+            ui.ctx().copy_text(url.clone());
+            ui.close();
+        }
+        if ui.button("📄 Add .mcp.json to this project").on_hover_text("Agents started in the project folder connect automatically").clicked() {
+            match write_mcp_json(&self.project.root, &url) {
+                Ok(p) => self.set_status(format!("Wrote {}", p.display())),
+                Err(e) => self.set_status(format!("Could not write .mcp.json: {e}")),
+            }
+            ui.close();
+        }
+
+        ui.separator();
+        if ui.button("⚙ MCP preferences…").clicked() {
+            self.prefs_window.open = true;
+            ui.close();
+        }
+        ui.hyperlink_to("📖 Tools and docs", "https://github.com/Matheuswells/dumb_engine/blob/main/docs/MCP.md");
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, renderer: &mut Renderer) {
@@ -1581,6 +1678,13 @@ impl Editor {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let act = crate::mcp::activity();
+                if self.settings.mcp_enabled && act.active_within(std::time::Duration::from_secs(10)) {
+                    let last = act.calls.front().map_or(String::new(), |c| format!(" · {}", c.tool));
+                    ui.colored_label(egui::Color32::from_rgb(110, 200, 120), format!("🔌 Agent active{last}"))
+                        .on_hover_text("An AI agent is driving the editor over MCP. See the MCP menu.");
+                    ui.separator();
+                }
                 let st = renderer.stats;
                 if let Some(p) = &self.physics {
                     ui.weak(format!("physics {} bodies · {:.2} ms", p.stats.bodies, p.stats.step_ms));
@@ -1787,6 +1891,7 @@ impl Editor {
         if find_primary_camera(&self.docs[self.active].world).is_none() {
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "No camera in the scene (GameObject ▸ Camera)", egui::FontId::proportional(16.0), egui::Color32::LIGHT_GRAY);
         }
+        self.game_hovered = resp.hovered();
         if resp.clicked() && self.play == PlayMode::Playing {
             self.game_focused = true;
         }
@@ -2148,6 +2253,25 @@ pub fn populate_default_scene(w: &mut World) {
     let ground = w.spawn_named("Ground");
     w.insert(ground, MeshRenderer { model: builtin::PLANE, tint: Color::rgb(0.45, 0.47, 0.5), ..Default::default() });
     w.insert(ground, dumb_ecs::Collider::fitted(dumb_ecs::ColliderShape::Box));
+}
+
+/// Add (or update) the `dumb-engine` server in `<project>/.mcp.json`, keeping other servers.
+fn write_mcp_json(root: &Path, url: &str) -> Result<PathBuf, String> {
+    let path = root.join(".mcp.json");
+    let mut doc: serde_json::Value = match std::fs::read_to_string(&path) {
+        Ok(s) => serde_json::from_str(&s).map_err(|e| format!("existing file is not valid JSON: {e}"))?,
+        Err(_) => serde_json::json!({}),
+    };
+    let servers = doc
+        .as_object_mut()
+        .ok_or("existing file is not a JSON object")?
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    let servers = servers.as_object_mut().ok_or("`mcpServers` is not an object")?;
+    servers.insert("dumb-engine".into(), serde_json::json!({ "type": "http", "url": url }));
+    let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text + "\n").map_err(|e| e.to_string())?;
+    Ok(path)
 }
 
 /// Vector icon for lights (`Some`) and cameras (`None`) in the scene view.
