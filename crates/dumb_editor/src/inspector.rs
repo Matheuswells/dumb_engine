@@ -46,11 +46,15 @@ fn vec_row(ui: &mut egui::Ui, vals: &mut [f32], speed: f64, readonly: bool) -> b
         egui::Color32::from_rgb(80, 120, 220),
         egui::Color32::GRAY,
     ];
-    let w = ((ui.available_width() - vals.len() as f32 * 18.0) / vals.len() as f32).max(30.0);
+    // Share the row so four components (Vec4) still fit a narrow column.
+    let n = vals.len() as f32;
+    let per_label = 12.0 + 2.0 * ui.spacing().item_spacing.x;
+    let w = ((ui.available_width() - n * per_label) / n).max(20.0);
+    // Drag values are at least `interact_size.x` wide; let them shrink to the share.
+    ui.spacing_mut().interact_size.x = ui.spacing().interact_size.x.min(w);
     for (i, v) in vals.iter_mut().enumerate() {
         ui.label(egui::RichText::new(labels[i]).color(colors[i]).strong());
-        changed |= ui.add_enabled(!readonly, egui::DragValue::new(v).speed(speed).max_decimals(3)).changed();
-        let _ = w;
+        changed |= ui.add_enabled_ui(!readonly, |ui| ui.add_sized([w, 18.0], egui::DragValue::new(v).speed(speed).max_decimals(3)).changed()).inner;
     }
     changed
 }
