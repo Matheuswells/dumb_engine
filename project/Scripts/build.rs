@@ -17,10 +17,22 @@ fn main() {
         if !is_rs || !valid || stem == "lib" || stem == "main" {
             continue;
         }
+        // Keywords (move.rs, type.rs...) become raw identifiers; a few can't be used at all.
+        const KEYWORDS: &[&str] = &[
+            "as", "async", "await", "break", "const", "continue", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
+            "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "static", "struct", "trait", "true", "type", "unsafe", "use",
+            "where", "while", "abstract", "become", "box", "do", "final", "gen", "macro", "override", "priv", "try", "typeof", "unsized",
+            "virtual", "yield",
+        ];
+        if matches!(stem, "self" | "super" | "crate" | "Self") {
+            println!("cargo:warning=script file `{stem}.rs` can't be a module name; rename it");
+            continue;
+        }
+        let ident = if KEYWORDS.contains(&stem) { format!("r#{stem}") } else { stem.to_string() };
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        writeln!(mods, "#[path = {:?}]\npub mod {stem};", path.display().to_string()).unwrap();
+        writeln!(mods, "#[path = {:?}]\npub mod {ident};", path.display().to_string()).unwrap();
         if text.contains("pub fn register(") {
-            writeln!(calls, "    {stem}::register(reg);").unwrap();
+            writeln!(calls, "    {ident}::register(reg);").unwrap();
         }
     }
     let out = format!("{mods}\n/// Registers every script module (generated).\npub fn register_scripts(reg: &mut dumb_script::Registry) {{\n{calls}}}\n");
