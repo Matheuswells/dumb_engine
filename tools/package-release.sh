@@ -4,9 +4,9 @@
 #   tools/package-release.sh <tag> <platform>      e.g. tools/package-release.sh v0.2.0 windows-x64
 #
 # Writes dist/DumbEngine-<tag>-<platform>.zip (Windows) or .tar.gz (others). The bundle holds the
-# editor and player executables plus the engine sources, because game scripts are Rust crates
-# that compile against them, and a rust-toolchain.toml pinning the compiler the executables were
-# built with (scripts must use the same one). Used by .github/workflows/release.yml.
+# editor, player and headless server executables plus the engine sources, because game scripts
+# are Rust crates that compile against them, and a rust-toolchain.toml pinning the compiler the
+# executables were built with (scripts must use the same one). Used by .github/workflows/release.yml.
 set -euo pipefail
 
 tag="${1:?usage: package-release.sh <tag> <platform>}"
@@ -16,8 +16,8 @@ cd "$root"
 
 exe=""
 case "$platform" in windows*) exe=".exe" ;; esac
-for bin in dumb-editor dumb-player; do
-    [[ -f "target/release/$bin$exe" ]] || { echo "target/release/$bin$exe is missing; run: cargo build --release --bin dumb-editor --bin dumb-player" >&2; exit 1; }
+for bin in dumb-editor dumb-player dumb-server; do
+    [[ -f "target/release/$bin$exe" ]] || { echo "target/release/$bin$exe is missing; run: cargo build --release --bin dumb-editor --bin dumb-player && cargo build --release -p dumb_runtime --no-default-features --bin dumb-server" >&2; exit 1; }
 done
 
 name="DumbEngine-$tag-$platform"
@@ -25,7 +25,7 @@ out="dist/$name"
 rm -rf "$out" "dist/$name.zip" "dist/$name.tar.gz"
 mkdir -p "$out"
 
-cp "target/release/dumb-editor$exe" "target/release/dumb-player$exe" "$out/"
+cp "target/release/dumb-editor$exe" "target/release/dumb-player$exe" "target/release/dumb-server$exe" "$out/"
 cp Cargo.toml Cargo.lock README.md "$out/"
 cp -r crates docs tools "$out/"
 cp -r project "$out/project"
@@ -52,6 +52,7 @@ Dumb Engine $tag ($platform)
 Requirements: a GPU with Vulkan 1.3. Blender is optional (for .blend/.fbx/.obj import).
 Keep this folder together: the editor compiles game scripts against crates/.
 Updates: Help > Check for Updates... installs new releases into this folder.
+Headless server: dumb-server$exe project (no GPU needed; see README.md).
 Docs: README.md, docs/ (AI agents: docs/MCP.md).
 EOF
 

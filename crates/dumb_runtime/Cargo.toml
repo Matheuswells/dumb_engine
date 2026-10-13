@@ -6,25 +6,39 @@ edition.workspace = true
 [[bin]]
 name = "dumb-player"
 path = "src/bin/player.rs"
+required-features = ["render"]
+
+# Headless: `cargo build -p dumb_runtime --no-default-features --bin dumb-server`
+# builds it without dumb_render, winit, egui or wry.
+[[bin]]
+name = "dumb-server"
+path = "src/bin/server.rs"
+
+[features]
+default = ["render"]
+# Window, GPU and UI: the player, the HUD and web views, the performance overlay.
+render = ["dep:dumb_render", "dep:winit", "dep:egui", "dep:egui-winit", "dep:image", "dep:sysinfo", "dep:wry"]
 
 [dependencies]
 dumb_core.workspace = true
 dumb_reflect.workspace = true
 dumb_ecs.workspace = true
 dumb_asset.workspace = true
-dumb_render.workspace = true
+dumb_render = { workspace = true, optional = true }
 dumb_script.workspace = true
 dumb_physics.workspace = true
-winit.workspace = true
-egui.workspace = true
-image.workspace = true
-egui-winit.workspace = true
+winit = { workspace = true, optional = true }
+egui = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+egui-winit = { workspace = true, optional = true }
 log.workspace = true
 env_logger.workspace = true
 serde.workspace = true
 ron.workspace = true
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
-wry = { version = "0.57", features = ["devtools"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"], optional = true }
+wry = { version = "0.57", features = ["devtools"], optional = true }
+# The headless server stops cleanly on Ctrl+C and SIGTERM.
+ctrlc = { version = "3", features = ["termination"] }
 
 [dev-dependencies]
 log.workspace = true

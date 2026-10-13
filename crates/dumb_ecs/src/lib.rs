@@ -27,7 +27,7 @@ pub use physics::{BodyType, CharacterController, Collider, ColliderShape, RigidB
 pub use dumb_derive::{Component, Editor};
 pub use query::{QueryData, QueryIter, ReadOnlyQueryData, With, Without};
 pub use scene::{EntityData, SceneData};
-pub use streaming::{IncrementalSpawn, StreamingCell};
+pub use streaming::{IncrementalSpawn, StreamFocus, StreamingCell};
 pub use world::World;
 
 use dumb_reflect::{Reflect, Typed};

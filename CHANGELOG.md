@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Server
+- **Headless server**: `dumb-server [project] [scene] [--hz N] [--ticks N]` runs a project's
+  scripts, physics, AI and world streaming with no window or GPU, at a fixed tick rate (30 Hz by
+  default), logging tick times every 10 s. Ctrl+C and SIGTERM stop it cleanly (scripts get
+  their `on_unload`). Build it with `cargo build -p dumb_runtime --no-default-features --bin
+  dumb-server`: without the new `render` feature, `dumb_runtime` doesn't pull in the renderer,
+  winit, egui or the web view, so it builds and runs on machines without a desktop.
+- **`StreamFocus` resource**: points that world streaming and AI distance LOD follow instead of
+  the primary camera. With several points the nearest one counts, so a server can keep the world
+  loaded around every player. `Streamer::update` and `ai::orchestrate` take a slice of points.
+- `find_primary_camera` moved to `dumb_ecs` (`dumb_render` re-exports it).
+
 ## v0.3.3
 
 Scripts must be rebuilt (ABI abi-10); the editor does it on its own.

@@ -6,7 +6,7 @@
     1. Checks that the working tree is clean, on main, and in sync with origin.
     2. Bumps [workspace.package] version in Cargo.toml (all crates inherit it)
        and commits "Release vX.Y.Z" when the version changes.
-    3. Builds dumb-editor and dumb-player in release mode.
+    3. Builds dumb-editor, dumb-player and dumb-server in release mode.
     4. Zips the binaries with README.md into target/dist/.
     5. Tags vX.Y.Z, pushes the commit and the tag, and creates the GitHub
        release with auto-generated notes and the zip attached.
@@ -111,6 +111,9 @@ try {
     Invoke-Native cargo @("build", "--release", "--locked",
         "-p", "dumb_editor", "--bin", "dumb-editor",
         "-p", "dumb_runtime", "--bin", "dumb-player")
+    # On its own, so it doesn't link the renderer, winit or the web view.
+    Invoke-Native cargo @("build", "--release", "--locked",
+        "-p", "dumb_runtime", "--no-default-features", "--bin", "dumb-server")
 
     # --- Package ---------------------------------------------------------
     Step "Packaging"
@@ -125,7 +128,7 @@ try {
     if (Test-Path $zip) { Remove-Item $zip -Force }
     New-Item -ItemType Directory -Force $stage | Out-Null
 
-    foreach ($bin in "dumb-editor", "dumb-player") {
+    foreach ($bin in "dumb-editor", "dumb-player", "dumb-server") {
         Copy-Item (Join-Path $root "target/release/$bin$exe") $stage
     }
     Copy-Item (Join-Path $root "README.md") $stage

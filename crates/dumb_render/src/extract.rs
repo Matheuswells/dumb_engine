@@ -4,6 +4,7 @@ use crate::types::*;
 use dumb_asset::model::Trs;
 use dumb_asset::{AssetDatabase, ModelData};
 use dumb_core::{AssetId, Color, Entity, Frustum, Mat4, Vec3};
+pub use dumb_ecs::find_primary_camera;
 use dumb_ecs::{Animator, Camera, Light, LightKind, MeshRenderer, World};
 
 #[derive(Default)]
@@ -195,18 +196,6 @@ pub fn world_skybox(world: &World) -> dumb_core::AssetId {
 pub fn camera_ink(world: &World, e: Entity) -> Option<InkSettings> {
     let ink = world.get::<dumb_ecs::InkOutline>(e).filter(|i| i.enabled)?;
     Some(InkSettings { color: ink.color, width: ink.width, silhouette: ink.silhouette, crease: ink.crease, fade_distance: ink.fade_distance })
-}
-
-/// First camera marked primary (or any camera).
-pub fn find_primary_camera(world: &World) -> Option<Entity> {
-    let mut any = None;
-    for (e, c) in world.query_ref::<(Entity, &Camera)>() {
-        if c.primary {
-            return Some(e);
-        }
-        any.get_or_insert(e);
-    }
-    any
 }
 
 /// Projected height of a bounding box's sphere as a fraction of the screen (1 = fills it),

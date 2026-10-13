@@ -92,29 +92,26 @@ fn phase(e: Entity) -> f32 {
     (x % 10_000) as f32 / 10_000.0
 }
 
-/// Schedule this frame's thinking. `focus` is usually the camera position (no LOD without it).
-pub fn orchestrate(world: &mut World, dt: f32, focus: Option<Vec3>, s: &AiSettings) -> AiStats {
+/// Schedule this frame's thinking. `focus` is usually the camera position, or one point per
+/// player on a server: an agent's band comes from the nearest point (no LOD when empty).
+pub fn orchestrate(world: &mut World, dt: f32, focus: &[Vec3], s: &AiSettings) -> AiStats {
     let mut stats = AiStats::default();
     // (entity, urgency) of agents that are due.
     let mut due: Vec<(Entity, f32)> = Vec::new();
     // World positions first (the agent loop below borrows the world mutably).
-    let positions: std::collections::HashMap<Entity, Vec3> = match focus {
-        Some(_) => {
-            let es: Vec<Entity> = world.query_ref::<(Entity, &AiAgent, &Transform)>().map(|(e, _, _)| e).collect();
-            es.into_iter().map(|e| (e, world.global_matrix(e).w_axis.truncate())).collect()
-        }
-        None => Default::default(),
+    let positions: std::collections::HashMap<Entity, Vec3> = if focus.is_empty() {
+        Default::default()
+    } else {
+        let es: Vec<Entity> = world.query_ref::<(Entity, &AiAgent, &Transform)>().map(|(e, _, _)| e).collect();
+        es.into_iter().map(|e| (e, world.global_matrix(e).w_axis.truncate())).collect()
     };
 
     for (e, a) in world.query::<(Entity, &mut AiAgent)>() {
         stats.agents += 1;
         a.think = false;
-        let lod = match (focus, a.distance_lod) {
-            (Some(f), true) => {
-                let d = positions.get(&e).map_or(0.0, |p| p.distance(f));
-                s.lod_distances.iter().position(|lim| d <= *lim).unwrap_or(3)
-            }
-            _ => 0,
+        let lod = match a.distance_lod.then(|| positions.get(&e).and_then(|p| crate::streaming::focus_distance(focus, *p))).flatten() {
+            Some(d) => s.lod_distances.iter().position(|lim| d <= *lim).unwrap_or(3),
+            None => 0,
         };
         a.lod = lod as u32;
         stats.per_lod[lod] += 1;
@@ -176,7 +173,7 @@ mod tests {
         let s = AiSettings { max_thinks_per_frame: 0, ..Default::default() };
         let mut per_frame = Vec::new();
         for _ in 0..120 {
-            per_frame.push(orchestrate(&mut w, 1.0 / 60.0, Some(Vec3::ZERO), &s).thinking);
+            per_frame.push(orchestrate(&mut w, 1.0 / 60.0, &[Vec3::ZERO], &s).thinking);
         }
         let total: u32 = per_frame.iter().sum();
         assert!((19_000..=21_000).contains(&total), "2 s at 10 Hz for 1000 agents: {total}");
@@ -190,7 +187,7 @@ mod tests {
         let s = AiSettings { max_thinks_per_frame: 100, ..Default::default() };
         let mut thought = std::collections::HashSet::new();
         for _ in 0..30 {
-            let st = orchestrate(&mut w, 1.0 / 60.0, Some(Vec3::ZERO), &s);
+            let st = orchestrate(&mut w, 1.0 / 60.0, &[Vec3::ZERO], &s);
             assert!(st.thinking <= 100);
             for e in &es {
                 if w.get::<AiAgent>(*e).unwrap().think {
@@ -216,7 +213,7 @@ mod tests {
         let s = AiSettings { max_thinks_per_frame: 0, ..Default::default() };
         let mut counts = [0; 3];
         for _ in 0..600 {
-            orchestrate(&mut w, 1.0 / 60.0, Some(Vec3::ZERO), &s);
+            orchestrate(&mut w, 1.0 / 60.0, &[Vec3::ZERO], &s);
             for (i, e) in [near, far, gone].iter().enumerate() {
                 counts[i] += w.get::<AiAgent>(*e).unwrap().think as u32;
             }
@@ -224,5 +221,27 @@ mod tests {
         assert!((195..=205).contains(&counts[0]), "near 20 Hz for 10 s: {}", counts[0]);
         assert!((10..=15).contains(&counts[1]), "far band /16: {}", counts[1]);
         assert_eq!(counts[2], 0, "asleep");
+    }
+
+    #[test]
+    fn the_nearest_focus_point_sets_the_band() {
+        // Two players far apart: agents near either one are in the near band.
+        let mut w = World::new();
+        let a = w.spawn_named("by player 1");
+        let b = w.spawn_named("by player 2");
+        let c = w.spawn_named("nobody near");
+        w.get_mut::<Transform>(b).unwrap().translation = Vec3::new(1000.0, 0.0, 0.0);
+        w.get_mut::<Transform>(c).unwrap().translation = Vec3::new(500.0, 0.0, 0.0);
+        for e in [a, b, c] {
+            w.insert(e, AiAgent::default());
+        }
+        w.update_transforms();
+        let s = AiSettings::default();
+        orchestrate(&mut w, 1.0 / 60.0, &[Vec3::ZERO, Vec3::new(1001.0, 0.0, 0.0)], &s);
+        let lod = |e| w.get::<AiAgent>(e).unwrap().lod;
+        assert_eq!((lod(a), lod(b), lod(c)), (0, 0, 3));
+        // No focus: no distance LOD.
+        orchestrate(&mut w, 1.0 / 60.0, &[], &s);
+        assert_eq!(w.get::<AiAgent>(c).unwrap().lod, 0);
     }
 }
