@@ -1209,6 +1209,7 @@ dependencies = [
  "log",
  "naga",
  "raw-window-handle",
+ "serde",
 ]
 
 [[package]]

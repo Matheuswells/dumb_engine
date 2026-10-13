@@ -91,6 +91,8 @@ fn vs_main(v: VIn, @builtin(instance_index) ii: u32) -> VOut {
 
 @fragment
 fn fs_main(in: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let dx = dpdx(in.world_pos);
+    let dy = dpdy(in.world_pos);
     let albedo = textureSample(t_albedo, samp, in.uv) * pc.albedo * in.tint;
     if ((pc.misc.x & FLAG_ALPHA_MASK) != 0u && albedo.a < bitcast<f32>(pc.misc.y)) {
         discard;
@@ -98,6 +100,11 @@ fn fs_main(in: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     var n = normalize(in.normal);
     if (!front) {
         n = -n;
+    }
+    // Editor view modes skip the custom shading.
+    let mode_color = view_mode_color(in.world_pos, dx, dy, n, albedo);
+    if (mode_color.a >= 0.0) {
+        return mode_color;
     }
     var s: Surface;
     s.world_pos = in.world_pos;

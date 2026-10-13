@@ -100,6 +100,8 @@ pub struct RenderView {
     pub lod_bias: f32,
     /// Sun shadows (cascaded shadow maps) for this view.
     pub shadows: bool,
+    /// What the view shows: the finished image, or a debug look (unlit, geometry, normals...).
+    pub mode: ViewMode,
     /// Ink outlines drawn over the image (comic look). `None` = off.
     pub ink: Option<InkSettings>,
 }
@@ -143,6 +145,7 @@ impl RenderView {
             lod_override: None,
             lod_bias: 1.0,
             shadows: true,
+            mode: ViewMode::Rendered,
             ink: None,
         }
     }
@@ -206,4 +209,53 @@ pub struct RenderStats {
     pub shadow_draws: u32,
     /// GPU time of the last measured frame (ms, from timestamps; 0 if unsupported).
     pub gpu_ms: f32,
+}
+
+/// How a view draws the scene: the finished image or a debug look (editor view modes).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ViewMode {
+    /// Everything: lighting, custom shaders, shadows and post effects.
+    #[default]
+    Rendered,
+    /// Like Rendered, without post effects (ink outlines).
+    NoPostProcessing,
+    /// Material colors and textures only: no lighting, shadows or custom shaders.
+    Unlit,
+    /// The geometry in plain clay, every facet visible: no materials or custom shaders.
+    Mesh,
+    /// Surface normals as colors (red = +X, green = +Y, blue = +Z).
+    Normals,
+    /// Triangle edges only.
+    Wireframe,
+}
+
+impl ViewMode {
+    pub const ALL: [ViewMode; 6] = [ViewMode::Rendered, ViewMode::NoPostProcessing, ViewMode::Unlit, ViewMode::Mesh, ViewMode::Normals, ViewMode::Wireframe];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ViewMode::Rendered => "Rendered",
+            ViewMode::NoPostProcessing => "No post-processing",
+            ViewMode::Unlit => "Unlit (textures only)",
+            ViewMode::Mesh => "Mesh (clay)",
+            ViewMode::Normals => "Normals",
+            ViewMode::Wireframe => "Wireframe",
+        }
+    }
+
+    /// Post effects (ink outlines) are drawn.
+    pub fn post(self) -> bool {
+        self == ViewMode::Rendered
+    }
+
+    /// Code the shaders read (`view.debug.x`): 0 = normal shading, 1 = unlit, 2 = mesh,
+    /// 3 = normals.
+    pub fn shader_code(self) -> f32 {
+        match self {
+            ViewMode::Unlit => 1.0,
+            ViewMode::Mesh => 2.0,
+            ViewMode::Normals => 3.0,
+            _ => 0.0,
+        }
+    }
 }

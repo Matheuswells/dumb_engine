@@ -1573,7 +1573,20 @@ impl Editor {
         ui.menu_button("View", |ui| {
             ui.checkbox(&mut self.settings.show_grid, "Grid");
             ui.checkbox(&mut self.settings.show_bounds, "Bounding boxes");
-            ui.add_enabled(renderer.wireframe_supported(), egui::Checkbox::new(&mut self.settings.wireframe, "Wireframe"));
+            ui.menu_button("Scene view mode", |ui| {
+                for m in dumb_render::ViewMode::ALL {
+                    if m != dumb_render::ViewMode::Wireframe || renderer.wireframe_supported() {
+                        ui.radio_value(&mut self.settings.scene_view_mode, m, m.label());
+                    }
+                }
+            });
+            ui.menu_button("Game view mode", |ui| {
+                for m in dumb_render::ViewMode::ALL {
+                    if m != dumb_render::ViewMode::Wireframe || renderer.wireframe_supported() {
+                        ui.radio_value(&mut self.settings.game_view_mode, m, m.label());
+                    }
+                }
+            });
             ui.checkbox(&mut self.settings.show_icons, "Light / camera icons");
             ui.checkbox(&mut self.settings.show_colliders, "Physics colliders");
             ui.checkbox(&mut self.settings.frustum_cull, "Frustum culling");
@@ -1949,6 +1962,19 @@ impl Editor {
             ui.separator();
             ui.selectable_value(&mut self.center_tab, CenterTab::Scene, "🎬 Scene");
             ui.selectable_value(&mut self.center_tab, CenterTab::Game, "🎮 Game");
+            // View mode of the view showing.
+            let wire_ok = renderer.wireframe_supported();
+            let mode = match self.center_tab {
+                CenterTab::Scene => &mut self.settings.scene_view_mode,
+                CenterTab::Game => &mut self.settings.game_view_mode,
+            };
+            egui::ComboBox::from_id_salt("view_mode").selected_text(mode.label()).show_ui(ui, |ui| {
+                for m in dumb_render::ViewMode::ALL {
+                    if m != dumb_render::ViewMode::Wireframe || wire_ok {
+                        ui.selectable_value(mode, m, m.label());
+                    }
+                }
+            });
         });
         self.update_title();
         match self.center_tab {
@@ -2195,7 +2221,9 @@ impl Editor {
             v.view = d.camera.view();
             v.proj = d.camera.proj(aspect);
             v.camera_pos = d.camera.position();
-            v.wireframe = settings.wireframe;
+            v.mode = settings.scene_view_mode;
+            // Rendered: the primary camera's post effects too, so the scene view matches the game.
+            v.ink = find_primary_camera(&d.world).and_then(|c| camera_ink(&d.world, c));
             v.time = elapsed;
             if settings.show_grid {
                 let step = if d.camera.distance > 200.0 { 10.0 } else { 1.0 };
@@ -2264,6 +2292,7 @@ impl Editor {
                 v.camera_pos = pos;
                 v.clear_color = clear;
                 v.ink = cam.and_then(|c| camera_ink(&d.world, c));
+                v.mode = self.settings.game_view_mode;
                 self.game_cam = (proj * view, pos);
                 let culled = extract_world(&d.world, &mut self.db, &mut v, &ExtractOptions { frustum_cull: self.settings.frustum_cull, ..Default::default() });
                 self.stats.culled = culled;

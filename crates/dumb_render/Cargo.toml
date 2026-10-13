@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+serde.workspace = true
 dumb_reflect.workspace = true
 dumb_core.workspace = true
 dumb_ecs.workspace = true

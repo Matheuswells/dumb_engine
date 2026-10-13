@@ -37,6 +37,8 @@ struct ViewUniforms {
     cam_forward: [f32; 4],
     /// Target size in pixels (xy) and its inverse (zw).
     screen: [f32; 4],
+    /// x = view mode code (`ViewMode::shader_code`), yzw unused.
+    debug: [f32; 4],
 }
 
 const _: () = assert!(std::mem::size_of::<ViewUniforms>() as u64 <= VIEW_STRIDE);
@@ -1077,7 +1079,7 @@ impl Renderer {
                     .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
                     .load_op(vk::AttachmentLoadOp::CLEAR)
                     // Kept for post effects (ink outlines read it).
-                    .store_op(if v.ink.is_some() { vk::AttachmentStoreOp::STORE } else { vk::AttachmentStoreOp::DONT_CARE })
+                    .store_op(if v.ink.is_some() && v.mode.post() { vk::AttachmentStoreOp::STORE } else { vk::AttachmentStoreOp::DONT_CARE })
                     .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 } });
                 device.cmd_begin_rendering(
                     cb,
@@ -1110,7 +1112,7 @@ impl Renderer {
                     let Some((set, mat)) = material_sets.get(&d.material) else { continue };
                     let variant = MeshVariant {
                         double_sided: mat.double_sided,
-                        wireframe: v.wireframe,
+                        wireframe: v.wireframe || v.mode == crate::ViewMode::Wireframe,
                         blend: mat.alpha_mode == AlphaMode::Blend,
                     };
                     let pipe = match self.custom_shaders.get(&mat.shader) {
@@ -1169,7 +1171,7 @@ impl Renderer {
                 device.cmd_end_rendering(cb);
 
                 // ---- ink outlines: a full-screen pass reading the depth just rendered
-                if let Some(ink) = v.ink {
+                if let Some(ink) = v.ink.filter(|_| v.mode.post()) {
                     barrier(&device, cb, target.depth.image, vk::ImageAspectFlags::DEPTH, 0, 1, vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
                     let ink_att = [vk::RenderingAttachmentInfo::default()
                         .image_view(target.color.view)
@@ -1345,6 +1347,7 @@ fn view_uniforms(v: &RenderView, sky: &Sky, size: vk::Extent2D) -> ViewUniforms 
         shadow_params: [if shadows_on { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0],
         cam_forward: fwd.extend(0.0).to_array(),
         screen: [size.width as f32, size.height as f32, 1.0 / size.width.max(1) as f32, 1.0 / size.height.max(1) as f32],
+        debug: [v.mode.shader_code(), 0.0, 0.0, 0.0],
     }
 }
 

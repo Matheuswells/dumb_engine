@@ -28,6 +28,8 @@ struct View {
     cam_forward: vec4<f32>,
     // target size in pixels (xy) and its inverse (zw)
     screen: vec4<f32>,
+    // x = view mode: 0 = normal shading, 1 = unlit, 2 = mesh (clay), 3 = normals
+    debug: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -176,6 +178,31 @@ fn aces(x: vec3<f32>) -> vec3<f32> {
 // Linear HDR color -> display color (exposure, ACES, gamma).
 fn tonemap(c: vec3<f32>) -> vec3<f32> {
     return pow(aces(c * view.params.z), vec3<f32>(1.0 / 2.2));
+}
+
+// Editor view modes (view.debug.x): the color of a pixel in a debug look, or alpha < 0 for
+// "shade normally". `dx`/`dy` are the screen derivatives of the world position (taken by the
+// caller in uniform control flow), `n` the shading normal, `albedo` material x texture.
+fn view_mode_color(world_pos: vec3<f32>, dx: vec3<f32>, dy: vec3<f32>, n: vec3<f32>, albedo: vec4<f32>) -> vec4<f32> {
+    let mode = u32(view.debug.x + 0.5);
+    if (mode == 1u) {
+        return vec4<f32>(pow(clamp(albedo.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(1.0 / 2.2)), albedo.a);
+    }
+    if (mode == 2u) {
+        // Clay: the facet's own normal, lit by the sun and a light at the camera.
+        let v = normalize(view.camera_pos.xyz - world_pos);
+        var f = normalize(cross(dx, dy));
+        if (dot(f, v) < 0.0) {
+            f = -f;
+        }
+        let sun = max(dot(f, -view.light_dir.xyz), 0.0);
+        let c = 0.16 + 0.42 * sun + 0.42 * max(dot(f, v), 0.0);
+        return vec4<f32>(vec3<f32>(0.78, 0.76, 0.72) * c, 1.0);
+    }
+    if (mode == 3u) {
+        return vec4<f32>(n * 0.5 + vec3<f32>(0.5), 1.0);
+    }
+    return vec4<f32>(0.0, 0.0, 0.0, -1.0);
 }
 
 // Hemisphere ambient light for normal `n`.

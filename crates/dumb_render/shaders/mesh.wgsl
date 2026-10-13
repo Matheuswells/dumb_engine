@@ -20,6 +20,9 @@ fn vs_main(v: VIn, @builtin(instance_index) ii: u32) -> VOut {
 
 @fragment
 fn fs_main(in: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    // (Derivatives first, in uniform control flow, for the view modes.)
+    let dx = dpdx(in.world_pos);
+    let dy = dpdy(in.world_pos);
     let albedo_tex = textureSample(t_albedo, samp, in.uv);
     let normal_tex = textureSample(t_normal, samp, in.uv).xyz;
     let mr_tex = textureSample(t_mr, samp, in.uv);
@@ -47,6 +50,11 @@ fn fs_main(in: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
             tn.y = -tn.y;
         }
         n = normalize(t * (tn.x * pc.pbr.z) + b * (tn.y * pc.pbr.z) + n * tn.z);
+    }
+
+    let mode_color = view_mode_color(in.world_pos, dx, dy, n, base);
+    if (mode_color.a >= 0.0) {
+        return mode_color;
     }
 
     var metal = clamp(pc.pbr.x * mr_tex.b, 0.0, 1.0);

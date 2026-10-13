@@ -30,7 +30,9 @@ pub struct EditorSettings {
     // Viewport
     pub show_grid: bool,
     pub show_bounds: bool,
-    pub wireframe: bool,
+    /// What the scene and game views show: the rendered image or a debug look.
+    pub scene_view_mode: dumb_render::ViewMode,
+    pub game_view_mode: dumb_render::ViewMode,
     pub frustum_cull: bool,
     /// Performance overlay in the scene view (F3 cycles it).
     pub scene_overlay: dumb_runtime::perf::PerfOverlay,
@@ -74,7 +76,8 @@ impl Default for EditorSettings {
             show_splash: true,
             show_grid: true,
             show_bounds: false,
-            wireframe: false,
+            scene_view_mode: dumb_render::ViewMode::Rendered,
+            game_view_mode: dumb_render::ViewMode::Rendered,
             frustum_cull: true,
             scene_overlay: dumb_runtime::perf::PerfOverlay::Minimal,
             show_icons: true,
