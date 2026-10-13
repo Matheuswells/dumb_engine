@@ -63,11 +63,12 @@ rustc version) and `dumb_plugin_register(&mut Registry)`. Rust has no stable ABI
 host refuses a plugin built by a different compiler.
 
 Reload sequence (`ScriptHost::load`):
-1. Every world `unregister`s each plugin component. Its data moves into missing storage.
-2. The old library is dropped. It was a *shadow copy* in `Library/ScriptCache`, so cargo
+1. The plugin's `on_unload` hooks run, so it can stop threads running its code.
+2. Every world `unregister`s each plugin component. Its data moves into missing storage.
+3. The old library is dropped. It was a *shadow copy* in `Library/ScriptCache`, so cargo
    was free to overwrite the original file.
-3. A new shadow copy is loaded and the ABI string is checked.
-4. The components are registered again, and missing data is applied back field by field.
+4. A new shadow copy is loaded and the ABI string is checked.
+5. The components are registered again, and missing data is applied back field by field.
 
 Systems are `fn(&mut ScriptContext)`. Each one runs through a trampoline compiled
 *inside* the plugin, which catches panics on the plugin's side of the boundary. The

@@ -137,6 +137,11 @@ impl ScriptHost {
     /// Unload: extract plugin component data into the worlds' "missing" storage, then drop the library.
     pub fn unload(&mut self, worlds: &mut [&mut World]) {
         let Some(l) = self.loaded.take() else { return };
+        for hook in &l.registry.unload_hooks {
+            if let Err(e) = (hook.runner)(hook.func) {
+                log::error!("script unload hook panicked: {e}");
+            }
+        }
         for w in worlds.iter_mut() {
             // Event payloads may be types (and drop code) from the library being unloaded.
             w.clear_events();

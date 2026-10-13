@@ -90,6 +90,8 @@ pub struct Registry {
     pub systems: Vec<SystemDesc>,
     pub plugin_name: String,
     pub host_log: HostLogFn,
+    /// Run just before the library is unloaded (rebuild, reload, closing the project).
+    pub unload_hooks: Vec<UnloadHook>,
 }
 
 fn run_guarded(f: SystemFn, ctx: &mut ScriptContext) -> Result<(), String> {
@@ -103,7 +105,7 @@ fn run_guarded(f: SystemFn, ctx: &mut ScriptContext) -> Result<(), String> {
 
 impl Registry {
     pub fn new(plugin_name: &str, host_log: HostLogFn) -> Self {
-        Registry { components: Vec::new(), systems: Vec::new(), plugin_name: plugin_name.into(), host_log }
+        Registry { components: Vec::new(), systems: Vec::new(), plugin_name: plugin_name.into(), host_log, unload_hooks: Vec::new() }
     }
 
     /// Register a component type so it can be stored, edited and serialized.
@@ -117,6 +119,29 @@ impl Registry {
     pub fn system(&mut self, name: &str, func: SystemFn) {
         self.systems.push(SystemDesc { name: name.into(), func, runner: run_guarded });
     }
+
+    /// Run `func` just before the library is unloaded: on every rebuild and reload, and when the
+    /// project closes. Scripts that start threads must stop (join) them here: the library's
+    /// code goes away right after, and a thread still running it would crash the editor.
+    pub fn on_unload(&mut self, func: fn()) {
+        self.unload_hooks.push(UnloadHook { func, runner: run_unload_guarded });
+    }
+}
+
+/// A function to run before the library unloads ([`Registry::on_unload`]).
+pub struct UnloadHook {
+    pub func: fn(),
+    /// Calls `func` catching panics (compiled into the plugin, like systems' runners).
+    pub runner: fn(fn()) -> Result<(), String>,
+}
+
+fn run_unload_guarded(f: fn()) -> Result<(), String> {
+    std::panic::catch_unwind(f).map_err(|e| {
+        e.downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| e.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "panic".into())
+    })
 }
 
 struct ForwardLogger(HostLogFn);
