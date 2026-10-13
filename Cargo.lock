@@ -1090,7 +1090,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_asset"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dumb_core",
  "dumb_derive",
@@ -1108,7 +1108,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bytemuck",
  "glam 0.30.10",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_derive"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_ecs"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dumb_core",
  "dumb_derive",
@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_editor"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "dumb_asset",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_physics"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dumb_asset",
  "dumb_core",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_reflect"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dumb_core",
  "serde",
@@ -1195,7 +1195,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_render"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ash",
  "ash-window",
@@ -1213,7 +1213,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_runtime"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dumb_asset",
  "dumb_core",
@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "dumb_script"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dumb_core",
  "dumb_derive",
