@@ -33,6 +33,8 @@ pub struct Context {
     pub upload_pool: vk::CommandPool,
     pub limits: vk::PhysicalDeviceLimits,
     pub wireframe_supported: bool,
+    /// Depth clamping: shadow casters in front of a cascade are flattened onto its near plane.
+    pub depth_clamp: bool,
     pub anisotropy: Option<f32>,
     pub device_name: String,
 }
@@ -149,7 +151,8 @@ impl Context {
             let supported = instance.get_physical_device_features(physical);
             let features = vk::PhysicalDeviceFeatures::default()
                 .fill_mode_non_solid(supported.fill_mode_non_solid == vk::TRUE)
-                .sampler_anisotropy(supported.sampler_anisotropy == vk::TRUE);
+                .sampler_anisotropy(supported.sampler_anisotropy == vk::TRUE)
+                .depth_clamp(supported.depth_clamp == vk::TRUE);
             let mut f13 = vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true).synchronization2(true);
             let mut f12 = vk::PhysicalDeviceVulkan12Features::default();
             let mut features2 = vk::PhysicalDeviceFeatures2::default().features(features).push_next(&mut f13).push_next(&mut f12);
@@ -217,6 +220,7 @@ impl Context {
                 upload_pool,
                 limits: props.limits,
                 wireframe_supported: supported.fill_mode_non_solid == vk::TRUE,
+                depth_clamp: supported.depth_clamp == vk::TRUE,
                 anisotropy: (supported.sampler_anisotropy == vk::TRUE).then_some(props.limits.max_sampler_anisotropy.min(8.0)),
                 device_name,
             })

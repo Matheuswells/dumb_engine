@@ -217,6 +217,17 @@ fn pbr_lighting(world_pos: vec3<f32>, geo_n: vec3<f32>, n: vec3<f32>, base: vec3
     return color;
 }
 
+const SHADOW_POISSON = array<vec2<f32>, 16>(
+    vec2<f32>(-0.94201624, -0.39906216), vec2<f32>(0.94558609, -0.76890725),
+    vec2<f32>(-0.09418410, -0.92938870), vec2<f32>(0.34495938, 0.29387760),
+    vec2<f32>(-0.91588581, 0.45771432), vec2<f32>(-0.81544232, -0.87912464),
+    vec2<f32>(-0.38277543, 0.27676845), vec2<f32>(0.97484398, 0.75648379),
+    vec2<f32>(0.44323325, -0.97511554), vec2<f32>(0.53742981, -0.47373420),
+    vec2<f32>(-0.26496911, -0.41893023), vec2<f32>(0.79197514, 0.19090188),
+    vec2<f32>(-0.24188840, 0.99706507), vec2<f32>(-0.81409955, 0.91437590),
+    vec2<f32>(0.19984126, 0.78641367), vec2<f32>(0.14383161, -0.14100790),
+);
+
 // 0 = fully shadowed, 1 = lit.
 fn sun_shadow(world_pos: vec3<f32>, n: vec3<f32>) -> f32 {
     if (view.shadow_params.x < 0.5) {
@@ -241,16 +252,17 @@ fn sun_shadow(world_pos: vec3<f32>, n: vec3<f32>) -> f32 {
     if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
         return 1.0;
     }
-    // 3x3 PCF on top of the hardware's 2x2 compare filtering.
+    // 16 Poisson-disc taps (on top of the hardware's 2x2 compare filtering), the disc rotated
+    // per point so the penumbra is smooth instead of stepping along shadow-map texels.
     let size = 1.0 / f32(textureDimensions(shadow_tex).x);
+    let angle = 6.2831853 * fract(sin(dot(world_pos, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+    let rot = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
+    var taps = SHADOW_POISSON;
     var lit = 0.0;
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            let o = vec2<f32>(f32(x), f32(y)) * size;
-            lit += textureSampleCompareLevel(shadow_tex, shadow_samp, uv + o, i32(c), ndc.z);
-        }
+    for (var i = 0; i < 16; i++) {
+        lit += textureSampleCompareLevel(shadow_tex, shadow_samp, uv + rot * taps[i] * (1.75 * size), i32(c), ndc.z);
     }
-    lit = lit / 9.0;
+    lit = lit / 16.0;
     // Fade out at the end of the shadow distance.
     let fade = clamp((view.shadow_splits.w - depth) / (view.shadow_splits.w * 0.1), 0.0, 1.0);
     return mix(1.0, lit, view.shadow_params.y * fade);

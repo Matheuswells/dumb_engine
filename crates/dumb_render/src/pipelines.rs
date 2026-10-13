@@ -52,6 +52,8 @@ struct Desc<'a> {
     vs: &'a std::ffi::CStr,
     fs: &'a std::ffi::CStr,
     depth_bias: bool,
+    /// Clamp depth instead of clipping (shadow casters in front of the near plane still cast).
+    depth_clamp: bool,
 }
 
 fn build(ctx: &Context, d: &Desc) -> vk::Pipeline {
@@ -68,7 +70,8 @@ fn build(ctx: &Context, d: &Desc) -> vk::Pipeline {
         .polygon_mode(d.polygon)
         .cull_mode(d.cull)
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-        .line_width(1.0);
+        .line_width(1.0)
+        .depth_clamp_enable(d.depth_clamp);
     let rs = if d.depth_bias { rs.depth_bias_enable(true).depth_bias_constant_factor(1.5).depth_bias_slope_factor(2.0) } else { rs };
     let ms = vk::PipelineMultisampleStateCreateInfo::default().rasterization_samples(vk::SampleCountFlags::TYPE_1);
     let ds = vk::PipelineDepthStencilStateCreateInfo::default()
@@ -278,6 +281,7 @@ impl Pipelines {
                 vs: c"vs_main",
                 fs: c"fs_main",
                 depth_bias: false,
+                depth_clamp: false,
             },
         );
 
@@ -303,6 +307,7 @@ impl Pipelines {
                 vs: c"vs_ink",
                 fs: c"fs_ink",
                 depth_bias: false,
+                depth_clamp: false,
             },
         );
         unsafe { ctx.device.destroy_shader_module(ink_mod, None) };
@@ -326,6 +331,7 @@ impl Pipelines {
                 vs: c"vs_shadow",
                 fs: c"fs_shadow",
                 depth_bias: true,
+                depth_clamp: ctx.depth_clamp,
             },
         );
 
@@ -354,6 +360,7 @@ impl Pipelines {
                     vs: c"vs_main",
                     fs: c"fs_main",
                     depth_bias: false,
+                    depth_clamp: false,
                 },
             );
             if overlay {
@@ -387,6 +394,7 @@ impl Pipelines {
                 vs: c"vs_main",
                 fs: c"fs_main",
                 depth_bias: false,
+                depth_clamp: false,
             },
         );
 
@@ -428,6 +436,7 @@ impl Pipelines {
                             vs: c"vs_main",
                             fs: c"fs_main",
                             depth_bias: false,
+                            depth_clamp: false,
                         },
                     );
                     out.push((v, pipe));

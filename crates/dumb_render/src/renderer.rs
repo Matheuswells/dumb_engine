@@ -837,8 +837,12 @@ impl Renderer {
                         if s.w > 0.0 {
                             let p = m * s.truncate().extend(1.0);
                             let r = s.w;
-                            // Orthographic: outside the slab in x/y, or past the far plane.
-                            if p.x.abs() > 1.0 + r * sx || p.y.abs() > 1.0 + r * sy || p.z - r * sz > 1.0 || p.z + r * sz < 0.0 {
+                            // Orthographic: outside the slab in x/y, or past the far plane. With
+                            // depth clamp, casters between the sun and the near plane are kept:
+                            // they're flattened onto it and still cast (a planet's horizon at
+                            // sunset can be kilometers away).
+                            let before_near = p.z + r * sz < 0.0 && !self.ctx.depth_clamp;
+                            if p.x.abs() > 1.0 + r * sx || p.y.abs() > 1.0 + r * sy || p.z - r * sz > 1.0 || before_near {
                                 continue;
                             }
                         }
