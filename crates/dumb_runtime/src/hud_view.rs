@@ -84,7 +84,10 @@ impl HudView {
         for (k, cmd) in hud.commands.iter().enumerate() {
             match cmd {
                 HudCmd::Panel { pos, size, color, rounding } => {
-                    painter.rect_filled(element_rect(screen, *pos, *size), *rounding, c32(*color));
+                    let r = element_rect(screen, *pos, *size);
+                    painter.rect_filled(r, *rounding, c32(*color));
+                    // Panels are UI too: the pointer over one isn't over the game world.
+                    over_ui |= interactive && ui.rect_contains_pointer(r);
                 }
                 HudCmd::Text { pos, text, size, color } => {
                     let font = egui::FontId::proportional(*size);
@@ -165,6 +168,7 @@ impl HudView {
         }
         hud.clicked = clicked;
         hud.pointer_over_ui = over_ui;
+        hud.screen_size = Vec2::new(screen.width(), screen.height());
         if self.images.values().any(|i| i.frames.len() > 1) {
             ui.ctx().request_repaint();
         }

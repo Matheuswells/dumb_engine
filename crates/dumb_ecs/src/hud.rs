@@ -87,8 +87,11 @@ pub struct Hud {
     pub commands: Vec<HudCmd>,
     /// Buttons clicked during the previous frame (filled by the runtime).
     pub clicked: Vec<String>,
-    /// Pointer over any HUD button/web panel (games can ignore world clicks then).
+    /// Pointer over any HUD panel, button or web page (games can ignore world clicks and the
+    /// mouse wheel then, e.g. to scroll a panel instead).
     pub pointer_over_ui: bool,
+    /// Size of the game view in HUD pixels (filled by the runtime; zero before the first frame).
+    pub screen_size: Vec2,
     /// Messages pages sent with `window.ipc.postMessage(text)` since last frame: (web id, text).
     pub web_messages: Vec<(String, String)>,
     /// JavaScript to run in web panels this frame: (web id, code). Use [`Hud::web_eval`].
