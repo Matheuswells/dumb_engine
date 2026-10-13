@@ -115,6 +115,8 @@ Scripts log with `trace!`, `debug!`, `info!`, `warn!` and `error!` (in the prelu
 
 Scripts also get `ctx.physics`: `raycast`, `overlap_sphere` and `collision_events()`. Physics components are plain data, so scripts move bodies by editing them: `rb.apply_impulse(..)`, `rb.add_force(..)`, `rb.linear_velocity = ..`, `cc.move_velocity(..)` and `cc.jump(..)`. See `project/Scripts/src/physics_toys.rs` (press F while playing to throw balls).
 
+Scripts can make meshes in code, with no file: build a `RuntimeMesh` (positions, normals, UVs, and parts with their own materials, on any thread), then `ctx.meshes.set(AssetId::from_name("my_game/chunk_12"), mesh)` and use the id as a `MeshRenderer` model. It's on the GPU by the next frame. Setting the id again replaces it, and `ctx.meshes.remove(id)` frees it. Stopping play frees them all. Scripts that start threads stop them in `reg.on_unload(..)`, which runs before every reload.
+
 Right-click a script component in the inspector and choose **📝 Edit Script** to open its
 source. The demo's scripts are in [project/Scripts/src](project/Scripts/src): player movement,
 a spinner, procedural bobbing, value noise, and a procedural block field that spawns and

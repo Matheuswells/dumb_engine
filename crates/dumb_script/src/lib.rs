@@ -47,7 +47,7 @@ pub mod prelude {
     pub use dumb_ecs::{
         AiAgent, Anchor, Animator, BodyType, Camera, CharacterController, Commands, Hud, HudPos, StreamingCell, UiBar, UiButton, UiImage,
         UiPanel, UiText, UiWeb, UiWorldLabel, Collider, ColliderShape, Component, Editor, Light, LightKind, MeshRenderer, Name,
-        Parent, RigidBody, Transform, With, Without, World,
+        MeshPart, MeshUploads, Parent, RigidBody, RuntimeMesh, Transform, With, Without, World,
     };
 }
 
@@ -67,6 +67,8 @@ pub struct ScriptContext<'a> {
     pub physics: &'a dyn dumb_core::physics::PhysicsQuery,
     /// Screen UI drawn this frame: text, bars, images, buttons, web pages (see `Hud`).
     pub hud: &'a mut dumb_ecs::Hud,
+    /// Meshes made in code (procedural terrain...): `set` / `remove` by id (see `RuntimeMesh`).
+    pub meshes: &'a mut dumb_ecs::MeshUploads,
 }
 
 pub type SystemFn = fn(&mut ScriptContext);

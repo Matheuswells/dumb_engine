@@ -33,6 +33,12 @@ impl AssetId {
         self.0.is_nil()
     }
 
+    /// Deterministic id from a name: the same name always gives the same id (e.g. for meshes a
+    /// script makes at runtime, `"my_game/terrain/chunk_12"`).
+    pub fn from_name(name: &str) -> AssetId {
+        AssetId(uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, name.as_bytes()))
+    }
+
     /// Deterministic id for a sub-asset (mesh #3 inside a model, etc.).
     pub fn sub(&self, kind: &str, index: usize) -> AssetId {
         let name = format!("{}/{}/{}", self.0, kind, index);
@@ -266,7 +272,7 @@ impl Ray {
 }
 
 /// Engine ABI tag. Script plugins built against a different engine/compiler are refused.
-pub const ENGINE_ABI: &str = concat!("dumb-engine/", env!("CARGO_PKG_VERSION"), "/abi-9");
+pub const ENGINE_ABI: &str = concat!("dumb-engine/", env!("CARGO_PKG_VERSION"), "/abi-10");
 
 /// Fixed ids of built-in assets (procedural primitives, default material).
 pub mod builtin {

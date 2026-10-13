@@ -250,6 +250,7 @@ pub struct SimStats {
 }
 
 /// One simulation frame: world streaming, AI scheduling, scripts, physics, animation.
+/// Scripts' mesh changes land in `meshes`: apply them with `AssetDatabase::apply_mesh_uploads`.
 #[allow(clippy::too_many_arguments)]
 pub fn simulate(
     world: &mut World,
@@ -261,6 +262,7 @@ pub fn simulate(
     streamer: Option<&mut streaming::Streamer>,
     settings: &ProjectSettings,
     hud: &mut dumb_ecs::Hud,
+    meshes: &mut dumb_ecs::MeshUploads,
 ) -> SimStats {
     world.update_transforms();
     hud.begin_frame();
@@ -284,7 +286,7 @@ pub fn simulate(
         Some(p) => &**p,
         None => &no_physics,
     };
-    let mut ctx = ScriptContext { world, time, input, assets: &lookup, physics: query, hud: &mut *hud };
+    let mut ctx = ScriptContext { world, time, input, assets: &lookup, physics: query, hud: &mut *hud, meshes };
     {
         dumb_core::profile_scope!("scripts");
         scripts.run_systems(&mut ctx);

@@ -222,6 +222,8 @@ pub struct Editor {
     game_overlay: dumb_runtime::perf::PerfOverlay,
     /// Game HUD (scripts' commands + HUD components) and its renderer.
     pub hud: dumb_ecs::Hud,
+    /// Meshes scripts made this frame, applied to the asset database after they run.
+    meshes: dumb_ecs::MeshUploads,
     hud_view: dumb_runtime::hud_view::HudView,
     /// Game camera of the last frame (view-projection, position) for world-space HUD labels.
     game_cam: (Mat4, Vec3),
@@ -327,6 +329,7 @@ impl Editor {
             profiler_window: Default::default(),
             game_overlay: Default::default(),
             hud: Default::default(),
+            meshes: Default::default(),
             hud_view: Default::default(),
             game_cam: (Mat4::IDENTITY, Vec3::ZERO),
             web_browser: Default::default(),
@@ -545,8 +548,9 @@ impl Editor {
         let t0 = Instant::now();
         if self.play == PlayMode::Playing || self.step_once {
             self.time.advance(dt);
-            let Editor { docs, active, scripts, db, time, input, physics, streamer, project, stats, hud, .. } = self;
-            let sim = simulate(&mut docs[*active].world, scripts, db, time, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud);
+            let Editor { docs, active, scripts, db, time, input, physics, streamer, project, stats, hud, meshes, .. } = self;
+            let sim = simulate(&mut docs[*active].world, scripts, db, time, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud, meshes);
+            db.apply_mesh_uploads(meshes);
             stats.ai = sim.ai;
             stats.stream = sim.stream;
             self.step_once = false;
@@ -697,6 +701,9 @@ impl Editor {
         self.play = PlayMode::Edit;
         self.physics = None;
         self.streamer = None;
+        // Meshes scripts made while playing belong to the run that ended.
+        self.meshes = Default::default();
+        self.db.clear_runtime_meshes();
         self.game_focused = false;
         self.center_tab = CenterTab::Scene;
         self.input.clear();

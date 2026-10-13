@@ -743,6 +743,14 @@ impl Renderer {
             self.pending_egui_free.extend(e.textures.free.iter().copied());
         }
         self.update_sky(db.as_deref_mut());
+        // Runtime meshes scripts removed: free their GPU copies once no frame uses them.
+        if let Some(db) = db.as_deref_mut() {
+            for id in db.take_removed_models() {
+                if let Some(old) = self.assets.models.remove(&id) {
+                    self.pending_garbage.push(Garbage::Model(old));
+                }
+            }
+        }
         if self.window_size[0] == 0 || self.window_size[1] == 0 {
             return;
         }

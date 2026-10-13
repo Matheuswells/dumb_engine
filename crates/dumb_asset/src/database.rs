@@ -3,7 +3,7 @@
 
 use crate::import_blender::{self, BLENDER_FORMATS};
 use crate::material::MaterialData;
-use crate::model::{AnimationEvent, ModelData};
+use crate::model::{AnimationEvent, MeshData, ModelData, Node, Primitive, Vertex};
 use crate::primitives;
 use crate::texture::TextureData;
 use dumb_core::AssetId;
@@ -256,6 +256,10 @@ pub struct AssetDatabase {
     materials: HashMap<AssetId, MaterialData>,
     /// Versions of in-memory materials that have no file (editor previews).
     virtual_versions: HashMap<AssetId, u64>,
+    /// Models scripts made at runtime (`set_runtime_mesh`), and those removed since renderers
+    /// last asked.
+    runtime_meshes: HashSet<AssetId>,
+    removed_models: Vec<AssetId>,
     job_tx: Sender<JobResult>,
     job_rx: Receiver<JobResult>,
     _watcher: Option<notify::RecommendedWatcher>,
@@ -334,6 +338,8 @@ impl AssetDatabase {
             textures: HashMap::new(),
             materials: HashMap::new(),
             virtual_versions: HashMap::new(),
+            runtime_meshes: HashSet::new(),
+            removed_models: Vec::new(),
             job_tx,
             job_rx,
             fs_rx: watcher.as_ref().map(|_| fs_rx),
@@ -504,6 +510,9 @@ impl AssetDatabase {
         if let Some(e) = self.entries.get(&id) {
             return e.stem().to_string();
         }
+        if self.runtime_meshes.contains(&id) {
+            return format!("Runtime mesh {}", &id.0.to_string()[..8]);
+        }
         if let Some(s) = self.sub_assets.get(&id) {
             let parent = self.entries.get(&s.parent).map_or("?", |e| e.stem());
             let name = self.models.get(&s.parent).and_then(|m| match s.kind {
@@ -531,6 +540,94 @@ impl AssetDatabase {
         let v = self.next_version();
         self.materials.insert(id, m);
         self.virtual_versions.insert(id, v);
+    }
+
+    /// Set a model made at runtime (a script's [`RuntimeMesh`]), with no file. Renderers upload
+    /// it like a reimported model; setting the same id again replaces it.
+    pub fn set_runtime_mesh(&mut self, id: AssetId, mesh: &dumb_ecs::RuntimeMesh) {
+        let n = mesh.positions.len();
+        let mut vertices: Vec<Vertex> = (0..n)
+            .map(|i| Vertex {
+                position: mesh.positions[i],
+                normal: mesh.normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]),
+                uv: mesh.uvs.get(i).copied().unwrap_or_default(),
+                tangent: mesh.tangents.get(i).copied().unwrap_or([1.0, 0.0, 0.0, 1.0]),
+                ..Default::default()
+            })
+            .collect();
+        let valid = |indices: &[u32]| indices.iter().all(|&i| (i as usize) < n);
+        if mesh.tangents.len() != n {
+            let all: Vec<u32> = mesh.parts.iter().filter(|p| valid(&p.indices)).flat_map(|p| p.indices.iter().copied()).collect();
+            crate::import_gltf::compute_tangents(&mut vertices, &all);
+        }
+        let aabb = dumb_core::Aabb::from_points(mesh.positions.iter().map(|p| dumb_core::Vec3::from_array(*p)));
+        let mut primitives = Vec::new();
+        let mut remap = Vec::new();
+        for (slot, part) in mesh.parts.iter().enumerate() {
+            if !valid(&part.indices) {
+                log::error!("runtime mesh {id:?}: part {slot} has indices past its {n} vertices; skipped");
+                continue;
+            }
+            // Each part has its own vertex buffer: parts usually use different vertices, and a
+            // primitive's buffer holds just the vertices it draws.
+            let mut used: Vec<u32> = part.indices.clone();
+            used.sort_unstable();
+            used.dedup();
+            let mut map = HashMap::with_capacity(used.len());
+            let verts: Vec<Vertex> = used.iter().enumerate().map(|(k, &i)| {
+                map.insert(i, k as u32);
+                vertices[i as usize]
+            }).collect();
+            let indices = part.indices.iter().map(|i| map[i]).collect();
+            let aabb = dumb_core::Aabb::from_points(verts.iter().map(|v| dumb_core::Vec3::from_array(v.position)));
+            primitives.push(Primitive { vertices: verts, indices, material: Some(slot), aabb, lods: Vec::new() });
+            if !part.material.is_none() {
+                remap.push((slot, part.material));
+            }
+        }
+        let model = ModelData {
+            nodes: vec![Node { name: "mesh".into(), mesh: Some(0), ..Default::default() }],
+            roots: vec![0],
+            meshes: vec![MeshData { name: "mesh".into(), primitives }],
+            material_remap: remap,
+            bounds_cache: Some(aabb),
+            ..Default::default()
+        };
+        let v = self.next_version();
+        self.models.insert(id, Arc::new(model));
+        self.virtual_versions.insert(id, v);
+        self.runtime_meshes.insert(id);
+    }
+
+    /// Free a runtime model (CPU here; renderers drop their GPU copy, see `take_removed_models`).
+    pub fn remove_runtime_mesh(&mut self, id: AssetId) {
+        if self.runtime_meshes.remove(&id) {
+            self.models.remove(&id);
+            self.virtual_versions.remove(&id);
+            self.removed_models.push(id);
+        }
+    }
+
+    /// Apply the mesh changes scripts made this frame.
+    pub fn apply_mesh_uploads(&mut self, uploads: &mut dumb_ecs::MeshUploads) {
+        for id in std::mem::take(&mut uploads.remove) {
+            self.remove_runtime_mesh(id);
+        }
+        for (id, mesh) in std::mem::take(&mut uploads.set) {
+            self.set_runtime_mesh(id, &mesh);
+        }
+    }
+
+    /// Free every runtime model (leaving play mode, closing the project).
+    pub fn clear_runtime_meshes(&mut self) {
+        for id in self.runtime_meshes.iter().copied().collect::<Vec<_>>() {
+            self.remove_runtime_mesh(id);
+        }
+    }
+
+    /// Models removed since the last call, for renderers to free.
+    pub fn take_removed_models(&mut self) -> Vec<AssetId> {
+        std::mem::take(&mut self.removed_models)
     }
 
     /// Search by name. `t:model` / `t:texture` / ... filters by kind, `l:label` by label.
@@ -1070,5 +1167,46 @@ mod tests {
         for p in ["Robot.blend", "tex.png", "Main.scene", "Gold.mat"] {
             assert!(!is_ignored(Path::new(p)), "{p}");
         }
+    }
+
+    #[test]
+    fn runtime_meshes_set_replace_and_remove() {
+        let dir = std::env::temp_dir().join(format!("dumb_runtime_mesh_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("Assets")).unwrap();
+        let mut db = super::AssetDatabase::open(&dir).unwrap();
+        let id = dumb_core::AssetId::from_name("test/mesh");
+        let mat = dumb_core::AssetId::from_name("test/material");
+        let quad = |offset: f32| dumb_ecs::RuntimeMesh {
+            positions: vec![[offset, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 4],
+            parts: vec![
+                dumb_ecs::MeshPart { indices: vec![0, 1, 2], material: mat },
+                dumb_ecs::MeshPart { indices: vec![0, 2, 3], material: dumb_core::AssetId::NONE },
+            ],
+            ..Default::default()
+        };
+        let mut uploads = dumb_ecs::MeshUploads::default();
+        uploads.set(id, quad(0.0));
+        db.apply_mesh_uploads(&mut uploads);
+        let m = db.model(id).expect("runtime mesh");
+        let prims = &m.meshes[0].primitives;
+        assert_eq!(prims.len(), 2);
+        assert_eq!(prims[0].indices, vec![0, 1, 2]);
+        // The second part keeps only the vertices it uses.
+        assert_eq!(prims[1].vertices.len(), 3);
+        assert_eq!(m.material_id(id, 0), mat);
+        let v1 = db.version(id);
+        assert!(v1 > 0);
+
+        uploads.set(id, quad(-1.0));
+        db.apply_mesh_uploads(&mut uploads);
+        assert!(db.version(id) > v1);
+        assert_eq!(db.model(id).unwrap().meshes[0].primitives[0].vertices[0].position[0], -1.0);
+
+        uploads.remove(id);
+        db.apply_mesh_uploads(&mut uploads);
+        assert!(db.model_loaded(id).is_none());
+        assert_eq!(db.take_removed_models(), vec![id]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

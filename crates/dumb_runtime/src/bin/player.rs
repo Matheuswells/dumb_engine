@@ -38,6 +38,7 @@ struct Game {
     overlay: dumb_runtime::perf::PerfOverlay,
     sim: dumb_runtime::SimStats,
     hud: dumb_ecs::Hud,
+    meshes: dumb_ecs::MeshUploads,
     hud_view: dumb_runtime::hud_view::HudView,
     web: dumb_runtime::web::WebLayer,
 }
@@ -119,6 +120,7 @@ impl ApplicationHandler for App {
             },
             sim: Default::default(),
             hud: Default::default(),
+            meshes: Default::default(),
             hud_view: Default::default(),
             web: dumb_runtime::web::WebLayer::new(&self.project.root),
         });
@@ -146,7 +148,8 @@ impl ApplicationHandler for App {
                 g.time.advance(dt);
                 g.db.update();
                 g.scripts.update(&mut [&mut g.world]);
-                g.sim = simulate(&mut g.world, &mut g.scripts, &g.db, &g.time, &g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud);
+                g.sim = simulate(&mut g.world, &mut g.scripts, &g.db, &g.time, &g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes);
+                g.db.apply_mesh_uploads(&mut g.meshes);
 
                 let size = g.window.inner_size();
                 g.renderer.resize_target(g.target, size.width.max(1), size.height.max(1));
