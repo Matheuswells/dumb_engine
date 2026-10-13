@@ -425,6 +425,40 @@ pub fn feed_input(input: &mut Input, event: &winit::event::WindowEvent) {
     }
 }
 
+/// Keeps clicks on the HUD away from the game: a mouse press that starts over a HUD panel or
+/// button (`Hud::pointer_over_ui`) isn't given to the game, nor is the drag that follows, until
+/// the button is released. The wheel still reaches scripts, which check `pointer_over_ui` to
+/// scroll their UI instead.
+#[derive(Default)]
+pub struct HudInputFilter {
+    held: bool,
+}
+
+impl HudInputFilter {
+    /// Feed `event` to `input` unless it belongs to a press on the HUD.
+    pub fn feed(&mut self, input: &mut Input, event: &winit::event::WindowEvent, pointer_over_ui: bool) {
+        use winit::event::{ElementState, WindowEvent};
+        match event {
+            WindowEvent::MouseInput { state: ElementState::Pressed, .. } if self.held || pointer_over_ui => {
+                self.held = true;
+                return;
+            }
+            WindowEvent::MouseInput { state: ElementState::Released, .. } if self.held => {
+                self.held = false;
+                return;
+            }
+            WindowEvent::CursorMoved { position, .. } if self.held => {
+                // Follow the cursor without a delta, so the game's camera doesn't move.
+                input.mouse_pos = dumb_core::Vec2::new(position.x as f32, position.y as f32);
+                return;
+            }
+            WindowEvent::Focused(false) => self.held = false,
+            _ => {}
+        }
+        feed_input(input, event);
+    }
+}
+
 /// Root of the engine source tree (scripts crates depend on its crates by path).
 /// `DUMB_ENGINE_ROOT` overrides the location the editor was built from.
 pub fn engine_root() -> PathBuf {
@@ -567,5 +601,42 @@ mod limiter_tests {
             l.wait(0);
         }
         assert!(t1.elapsed().as_millis() < 50, "unlimited must not wait");
+    }
+}
+
+#[cfg(test)]
+mod hud_input_tests {
+    use super::HudInputFilter;
+    use dumb_core::{Input, MouseButton};
+    use winit::dpi::PhysicalPosition;
+    use winit::event::{DeviceId, ElementState, WindowEvent};
+
+    fn press(state: ElementState) -> WindowEvent {
+        // SAFETY: a placeholder id, only compared, never used to reach a device.
+        WindowEvent::MouseInput { device_id: unsafe { DeviceId::dummy() }, state, button: winit::event::MouseButton::Left }
+    }
+
+    fn moved(x: f64) -> WindowEvent {
+        WindowEvent::CursorMoved { device_id: unsafe { DeviceId::dummy() }, position: PhysicalPosition::new(x, 10.0) }
+    }
+
+    #[test]
+    fn presses_on_the_hud_and_their_drags_stay_out_of_the_game() {
+        let mut f = HudInputFilter::default();
+        let mut input = Input::default();
+        f.feed(&mut input, &moved(10.0), false);
+        input.end_frame();
+        // Pressed over the HUD, dragged off it: the game sees neither.
+        f.feed(&mut input, &press(ElementState::Pressed), true);
+        f.feed(&mut input, &moved(60.0), false);
+        assert!(!input.mouse_down(MouseButton::Left));
+        assert_eq!(input.mouse_delta.x, 0.0);
+        assert_eq!(input.mouse_pos.x, 60.0);
+        f.feed(&mut input, &press(ElementState::Released), false);
+        // The next press, over the game, goes through with its drag.
+        f.feed(&mut input, &press(ElementState::Pressed), false);
+        f.feed(&mut input, &moved(80.0), false);
+        assert!(input.mouse_down(MouseButton::Left));
+        assert_eq!(input.mouse_delta.x, 20.0);
     }
 }

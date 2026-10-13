@@ -15,7 +15,7 @@ use dumb_asset::{AssetDatabase, AssetEvent, AssetKind};
 use dumb_core::{builtin, Aabb, AssetId, Color, Entity, Input, Mat4, Time, Vec2, Vec3};
 use dumb_ecs::{Animator, Camera, Light, LightKind, MeshRenderer, Name, Parent, PrefabInstance, SceneData, Transform, World};
 use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, push_model, ExtractOptions, RenderTargetId, RenderView, Renderer};
-use dumb_runtime::{feed_input, simulate, Project};
+use dumb_runtime::{simulate, Project};
 use dumb_script::{ScriptHost, ScriptStatus};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -224,6 +224,8 @@ pub struct Editor {
     pub hud: dumb_ecs::Hud,
     /// Meshes scripts made this frame, applied to the asset database after they run.
     meshes: dumb_ecs::MeshUploads,
+    /// Keeps presses on the HUD from reaching the game.
+    hud_input: dumb_runtime::HudInputFilter,
     hud_view: dumb_runtime::hud_view::HudView,
     /// Game camera of the last frame (view-projection, position) for world-space HUD labels.
     game_cam: (Mat4, Vec3),
@@ -330,6 +332,7 @@ impl Editor {
             game_overlay: Default::default(),
             hud: Default::default(),
             meshes: Default::default(),
+            hud_input: Default::default(),
             hud_view: Default::default(),
             game_cam: (Mat4::IDENTITY, Vec3::ZERO),
             web_browser: Default::default(),
@@ -447,7 +450,7 @@ impl Editor {
             WindowEvent::MouseWheel { .. } if !over_game => return,
             _ => {}
         }
-        feed_input(&mut self.input, event);
+        self.hud_input.feed(&mut self.input, event, self.hud.pointer_over_ui);
     }
 
     pub fn import_dropped(&mut self, path: &Path) {

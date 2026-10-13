@@ -8,7 +8,7 @@ use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Time};
 use dumb_ecs::{SceneData, World};
 use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, world_skybox, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
-use dumb_runtime::{feed_input, simulate, Project};
+use dumb_runtime::{simulate, Project};
 use dumb_script::ScriptHost;
 use std::sync::Arc;
 use std::time::Instant;
@@ -39,6 +39,8 @@ struct Game {
     sim: dumb_runtime::SimStats,
     hud: dumb_ecs::Hud,
     meshes: dumb_ecs::MeshUploads,
+    /// Keeps presses on the HUD from reaching the game.
+    hud_input: dumb_runtime::HudInputFilter,
     hud_view: dumb_runtime::hud_view::HudView,
     web: dumb_runtime::web::WebLayer,
 }
@@ -121,6 +123,7 @@ impl ApplicationHandler for App {
             sim: Default::default(),
             hud: Default::default(),
             meshes: Default::default(),
+            hud_input: Default::default(),
             hud_view: Default::default(),
             web: dumb_runtime::web::WebLayer::new(&self.project.root),
         });
@@ -129,7 +132,7 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let Some(g) = &mut self.game else { return };
         let _ = g.egui_state.on_window_event(&g.window, &event);
-        feed_input(&mut g.input, &event);
+        g.hud_input.feed(&mut g.input, &event, g.hud.pointer_over_ui);
         match event {
             WindowEvent::CloseRequested => {
                 g.scripts.unload(&mut [&mut g.world]);
