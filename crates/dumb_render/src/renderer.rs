@@ -154,13 +154,17 @@ pub struct Renderer {
     pub vsync: bool,
     pub stats: RenderStats,
     sky: Sky,
+    /// The skybox texture showing (NONE = built-in) and the one asked for.
+    sky_id: dumb_core::AssetId,
+    sky_wanted: dumb_core::AssetId,
     shadow_map: ShadowMap,
     /// GPU time of the last measured frame (ms).
     pub gpu_ms: f32,
     custom_shaders: HashMap<dumb_core::AssetId, CustomShader>,
 }
 
-/// The built-in skybox: an equirectangular panorama with a full mip chain (for rough reflections).
+/// The skybox: an equirectangular panorama with a full mip chain (for rough reflections). The
+/// built-in one, or a texture asset the primary camera picks ([`Renderer::set_skybox`]).
 struct Sky {
     image: Image,
     sampler: vk::Sampler,
@@ -177,7 +181,10 @@ fn srgb_to_linear(c: u8) -> f32 {
 }
 
 fn load_sky(ctx: &mut Context) -> VkResult<Sky> {
-    let tex = dumb_asset::TextureData::decode("sky", SKY_PNG)?;
+    make_sky(ctx, &dumb_asset::TextureData::decode("sky", SKY_PNG)?)
+}
+
+fn make_sky(ctx: &mut Context, tex: &dumb_asset::TextureData) -> VkResult<Sky> {
     let (w, h) = (tex.width as usize, tex.height as usize);
     let average = |rows: std::ops::Range<usize>| {
         let mut sum = [0f64; 3];
@@ -366,11 +373,65 @@ impl Renderer {
                 vsync: true,
                 stats: RenderStats::default(),
                 sky,
+                sky_id: dumb_core::AssetId::NONE,
+                sky_wanted: dumb_core::AssetId::NONE,
                 shadow_map,
                 gpu_ms: 0.0,
                 custom_shaders: HashMap::new(),
             })
         }
+    }
+
+    /// The skybox to show: an equirectangular (2:1) panorama texture, or NONE for the built-in
+    /// sky. It also lights the scene and shows in reflections. Takes effect once the texture
+    /// has loaded (in [`Renderer::draw_frame`]).
+    pub fn set_skybox(&mut self, texture: dumb_core::AssetId) {
+        self.sky_wanted = texture;
+    }
+
+    /// Swap in the requested skybox when it differs from the one showing and its texture has loaded.
+    fn update_sky(&mut self, db: Option<&mut AssetDatabase>) {
+        if self.sky_wanted == self.sky_id {
+            return;
+        }
+        let made = if self.sky_wanted.is_none() {
+            load_sky(&mut self.ctx)
+        } else {
+            let Some(tex) = db.and_then(|db| db.texture(self.sky_wanted)) else { return };
+            if tex.width == 0 || tex.height == 0 || tex.rgba8.len() < (tex.width * tex.height * 4) as usize {
+                log::error!("skybox texture {} is empty", tex.name);
+                self.sky_id = self.sky_wanted;
+                return;
+            }
+            make_sky(&mut self.ctx, &tex)
+        };
+        self.sky_id = self.sky_wanted;
+        let sky = match made {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("skybox: {e}");
+                return;
+            }
+        };
+        // The old sky may still be in use by frames in flight.
+        unsafe { self.ctx.device.device_wait_idle().ok() };
+        let view = sky.image.srgb_view.unwrap_or(sky.image.view);
+        let img = [vk::DescriptorImageInfo::default().image_view(view).image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let smp = [vk::DescriptorImageInfo::default().sampler(sky.sampler)];
+        for f in &self.frames {
+            unsafe {
+                self.ctx.device.update_descriptor_sets(
+                    &[
+                        vk::WriteDescriptorSet::default().dst_set(f.set0).dst_binding(2).descriptor_type(vk::DescriptorType::SAMPLED_IMAGE).image_info(&img),
+                        vk::WriteDescriptorSet::default().dst_set(f.set0).dst_binding(3).descriptor_type(vk::DescriptorType::SAMPLER).image_info(&smp),
+                    ],
+                    &[],
+                )
+            };
+        }
+        let old = std::mem::replace(&mut self.sky, sky);
+        unsafe { self.ctx.device.destroy_sampler(old.sampler, None) };
+        self.ctx.destroy_image(old.image);
     }
 
     pub fn device_name(&self) -> &str {
@@ -681,6 +742,7 @@ impl Renderer {
             self.update_egui_textures(e.textures);
             self.pending_egui_free.extend(e.textures.free.iter().copied());
         }
+        self.update_sky(db.as_deref_mut());
         if self.window_size[0] == 0 || self.window_size[1] == 0 {
             return;
         }

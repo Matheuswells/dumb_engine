@@ -135,6 +135,10 @@ pub enum CameraBackground {
 pub struct Camera {
     pub projection: Projection,
     pub background: CameraBackground,
+    /// Panorama for the sky when `background` is Skybox: an equirectangular (2:1) texture.
+    /// None = the engine's built-in sky. The primary camera's choice is used everywhere.
+    #[editor(asset = "texture")]
+    pub skybox: AssetId,
     #[editor(range = 10.0..=150.0)]
     pub fov_degrees: f32,
     #[editor(speed = 0.1)]
@@ -159,6 +163,7 @@ impl Default for Camera {
             primary: true,
             clear_color: Color::rgb(0.08, 0.09, 0.11),
             background: CameraBackground::Skybox,
+            skybox: AssetId::NONE,
         }
     }
 }

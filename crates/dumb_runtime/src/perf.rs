@@ -31,8 +31,9 @@ pub struct SystemSample {
 }
 
 pub struct SystemMonitor {
-    sys: sysinfo::System,
-    pid: Option<sysinfo::Pid>,
+    /// Latest CPU/RAM numbers, written by a sampling thread: on Windows reading the process's
+    /// numbers takes ~7 ms, a stutter twice a second if done on the frame.
+    os: std::sync::Arc<std::sync::Mutex<SystemSample>>,
     last: Option<Instant>,
     pub sample: SystemSample,
     pub history: VecDeque<SystemSample>,
@@ -46,7 +47,30 @@ impl Default for SystemMonitor {
 
 impl SystemMonitor {
     pub fn new() -> Self {
-        SystemMonitor { sys: sysinfo::System::new(), pid: sysinfo::get_current_pid().ok(), last: None, sample: SystemSample::default(), history: VecDeque::new() }
+        let os = std::sync::Arc::new(std::sync::Mutex::new(SystemSample::default()));
+        let weak = std::sync::Arc::downgrade(&os);
+        let _ = std::thread::Builder::new().name("system monitor".into()).spawn(move || {
+            let mut sys = sysinfo::System::new();
+            let pid = sysinfo::get_current_pid().ok();
+            // Ends with its monitor.
+            while let Some(out) = weak.upgrade() {
+                sys.refresh_cpu_usage();
+                sys.refresh_memory();
+                let cores = sys.cpus().len().max(1) as u32;
+                let mut s = SystemSample { ram_used: sys.used_memory(), ram_total: sys.total_memory(), system_cpu: sys.global_cpu_usage(), cores, ..Default::default() };
+                if let Some(pid) = pid {
+                    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), false);
+                    if let Some(p) = sys.process(pid) {
+                        s.process_ram = p.memory();
+                        s.process_cpu = p.cpu_usage() / cores as f32;
+                    }
+                }
+                *out.lock().unwrap_or_else(|e| e.into_inner()) = s;
+                drop(out);
+                std::thread::sleep(SAMPLE_EVERY);
+            }
+        });
+        SystemMonitor { os, last: None, sample: SystemSample::default(), history: VecDeque::new() }
     }
 
     /// Refresh the numbers (cheap to call every frame: real work happens twice a second).
@@ -55,23 +79,7 @@ impl SystemMonitor {
             return;
         }
         self.last = Some(Instant::now());
-        self.sys.refresh_cpu_usage();
-        self.sys.refresh_memory();
-        let cores = self.sys.cpus().len().max(1) as u32;
-        let mut s = SystemSample {
-            ram_used: self.sys.used_memory(),
-            ram_total: self.sys.total_memory(),
-            system_cpu: self.sys.global_cpu_usage(),
-            cores,
-            ..Default::default()
-        };
-        if let Some(pid) = self.pid {
-            self.sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), false);
-            if let Some(p) = self.sys.process(pid) {
-                s.process_ram = p.memory();
-                s.process_cpu = p.cpu_usage() / cores as f32;
-            }
-        }
+        let mut s = *self.os.lock().unwrap_or_else(|e| e.into_inner());
         let (used, budget) = renderer.vram();
         s.vram_used = used;
         s.vram_budget = budget;

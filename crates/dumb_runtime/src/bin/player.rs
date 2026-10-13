@@ -7,7 +7,7 @@
 use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Time};
 use dumb_ecs::{SceneData, World};
-use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
+use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, world_skybox, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
 use dumb_runtime::{feed_input, simulate, Project};
 use dumb_script::ScriptHost;
 use std::sync::Arc;
@@ -153,6 +153,7 @@ impl ApplicationHandler for App {
                 let mut view = RenderView::new(g.target);
                 let aspect = size.width.max(1) as f32 / size.height.max(1) as f32;
                 let cam = find_primary_camera(&g.world);
+                g.renderer.set_skybox(world_skybox(&g.world));
                 if let Some((v, p, pos, clear, sky)) = cam.and_then(|c| camera_view(&g.world, c, aspect)) {
                     view.sky = sky;
                     view.view = v;

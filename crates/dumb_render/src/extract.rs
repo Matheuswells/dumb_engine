@@ -185,6 +185,12 @@ pub fn camera_view(world: &World, e: Entity, aspect: f32) -> Option<(Mat4, Mat4,
     Some((view, cam.projection_matrix(aspect), pos, cam.clear_color, cam.background == dumb_ecs::CameraBackground::Skybox))
 }
 
+/// The skybox texture a world's primary camera asks for (NONE = the built-in sky), for
+/// [`crate::Renderer::set_skybox`].
+pub fn world_skybox(world: &World) -> dumb_core::AssetId {
+    find_primary_camera(world).and_then(|c| world.get::<Camera>(c)).map_or(dumb_core::AssetId::NONE, |c| c.skybox)
+}
+
 /// Ink outline settings of a camera entity (its enabled `InkOutline` component).
 pub fn camera_ink(world: &World, e: Entity) -> Option<InkSettings> {
     let ink = world.get::<dumb_ecs::InkOutline>(e).filter(|i| i.enabled)?;

@@ -15,7 +15,7 @@ pub mod shadows;
 mod types;
 mod vk;
 
-pub use extract::{camera_ink, camera_view, extract_world, find_primary_camera, push_model, screen_size, skeleton_lines, ExtractOptions};
+pub use extract::{camera_ink, camera_view, extract_world, find_primary_camera, push_model, screen_size, skeleton_lines, world_skybox, ExtractOptions};
 pub use renderer::{EguiFrame, Renderer};
 pub use types::*;
 

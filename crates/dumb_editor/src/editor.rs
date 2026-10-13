@@ -1962,7 +1962,9 @@ impl Editor {
         if find_primary_camera(&self.docs[self.active].world).is_none() {
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "No camera in the scene (GameObject ▸ Camera)", egui::FontId::proportional(16.0), egui::Color32::LIGHT_GRAY);
         }
-        self.game_hovered = resp.hovered();
+        // Over the view even when a HUD button (drawn on top of it) has the pointer, or
+        // pressing a HUD button would take input away from the game before it clicks.
+        self.game_hovered = ui.rect_contains_pointer(rect);
         if resp.clicked() && self.play == PlayMode::Playing {
             self.game_focused = true;
         }
@@ -2169,7 +2171,9 @@ impl Editor {
 
     // ------------------------------------------------------------------ rendering
 
-    pub fn build_views(&mut self, _renderer: &mut Renderer) -> Vec<RenderView> {
+    pub fn build_views(&mut self, renderer: &mut Renderer) -> Vec<RenderView> {
+        // The active scene's primary camera picks the sky (in the scene view too).
+        renderer.set_skybox(dumb_render::world_skybox(&self.docs[self.active].world));
         let mut views = Vec::new();
         let t0 = Instant::now();
         let elapsed = self.time.elapsed as f32;
