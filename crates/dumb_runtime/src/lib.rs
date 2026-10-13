@@ -612,12 +612,11 @@ mod hud_input_tests {
     use winit::event::{DeviceId, ElementState, WindowEvent};
 
     fn press(state: ElementState) -> WindowEvent {
-        // SAFETY: a placeholder id, only compared, never used to reach a device.
-        WindowEvent::MouseInput { device_id: unsafe { DeviceId::dummy() }, state, button: winit::event::MouseButton::Left }
+        WindowEvent::MouseInput { device_id: DeviceId::dummy(), state, button: winit::event::MouseButton::Left }
     }
 
     fn moved(x: f64) -> WindowEvent {
-        WindowEvent::CursorMoved { device_id: unsafe { DeviceId::dummy() }, position: PhysicalPosition::new(x, 10.0) }
+        WindowEvent::CursorMoved { device_id: DeviceId::dummy(), position: PhysicalPosition::new(x, 10.0) }
     }
 
     #[test]
