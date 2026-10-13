@@ -109,10 +109,8 @@ pub fn orchestrate(world: &mut World, dt: f32, focus: &[Vec3], s: &AiSettings) -
     for (e, a) in world.query::<(Entity, &mut AiAgent)>() {
         stats.agents += 1;
         a.think = false;
-        let lod = match a.distance_lod.then(|| positions.get(&e).and_then(|p| crate::streaming::focus_distance(focus, *p))).flatten() {
-            Some(d) => s.lod_distances.iter().position(|lim| d <= *lim).unwrap_or(3),
-            None => 0,
-        };
+        let d = if a.distance_lod { positions.get(&e).and_then(|p| crate::streaming::focus_distance(focus, *p)) } else { None };
+        let lod = d.map_or(0, |d| s.lod_distances.iter().position(|lim| d <= *lim).unwrap_or(3));
         a.lod = lod as u32;
         stats.per_lod[lod] += 1;
         if lod >= 3 {

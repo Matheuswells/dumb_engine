@@ -38,7 +38,9 @@ fn parse_args() -> Result<Args, String> {
     while let Some(a) = it.next() {
         let mut number = |name: &str| it.next().and_then(|v| v.parse::<u64>().ok()).ok_or(format!("{name} needs a number"));
         match a.as_str() {
-            "--hz" => args.hz = number("--hz")?.clamp(1, 1000) as u32,
+            // At least 4: `Time::advance` caps a step at 0.25 s, so slower ticks would run game
+            // time slower than real time.
+            "--hz" => args.hz = number("--hz")?.clamp(4, 1000) as u32,
             "--ticks" => args.ticks = number("--ticks")?,
             "-h" | "--help" => return Err(String::new()),
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
@@ -68,6 +70,10 @@ fn main() {
         }
     };
 
+    // Nothing reads the profiler here and nothing calls `profiler::end_frame`, so recorded
+    // scopes would pile up in the current frame forever.
+    dumb_core::profiler::set_enabled(false);
+
     let stop = Arc::new(AtomicBool::new(false));
     {
         let stop = stop.clone();
@@ -91,6 +97,7 @@ fn main() {
     }
     let scene = args.scene.clone().unwrap_or(project.settings.startup_scene.clone());
     if !dumb_runtime::load_scene(&db, &mut world, &scene) {
+        scripts.unload(&mut [&mut world]);
         std::process::exit(1);
     }
     db.update();
@@ -113,6 +120,8 @@ fn main() {
         time.advance(tick_dt);
         let sim = simulate(&mut world, &mut scripts, &db, &time, &input, Some(&mut physics), Some(&mut streamer), &project.settings, &mut hud, &mut meshes);
         db.apply_mesh_uploads(&mut meshes);
+        // No web panels to run scripts' JavaScript in: drop it so it doesn't pile up.
+        hud.web_eval.clear();
         tick += 1;
         report.add(t0.elapsed(), tick_dt);
         if report.since.elapsed() >= REPORT_EVERY {
