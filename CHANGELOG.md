@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Simulation
+- **Fixed-timestep loop.** New project settings `sim_hz` / `sim_max_steps` run the simulation
+  (scripts, AI, streaming, animation) at a fixed tick rate independent of the frame rate;
+  `sim_hz = 0` keeps one tick per frame. `deterministic` makes every tick exactly `1/hz` and
+  derives `Time` from the tick counter, ignoring `time_scale`. In the editor and the player;
+  Project Preferences ▸ Game tick rate.
+
 ## v0.3.3
 
 Scripts must be rebuilt (ABI abi-10); the editor does it on its own.

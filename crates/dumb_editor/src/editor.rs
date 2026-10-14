@@ -196,7 +196,10 @@ pub struct Editor {
     play: PlayMode,
     play_snapshot: Option<(usize, SceneData)>,
     time: Time,
+    sim_clock: Option<dumb_core::FixedClock>,
     step_once: bool,
+    /// The last play frame ran no tick, so its input edges must survive `post_frame`.
+    hold_input: bool,
     input: Input,
     game_focused: bool,
     /// The pointer was over the game view last frame (not covered by a window).
@@ -310,7 +313,9 @@ impl Editor {
             play: PlayMode::Edit,
             play_snapshot: None,
             time: Time::new(),
+            sim_clock: None,
             step_once: false,
+            hold_input: false,
             input: Input::default(),
             game_focused: false,
             game_hovered: false,
@@ -550,14 +555,20 @@ impl Editor {
 
         let t0 = Instant::now();
         if self.play == PlayMode::Playing || self.step_once {
-            self.time.advance(dt);
-            let Editor { docs, active, scripts, db, time, input, physics, streamer, project, stats, hud, meshes, .. } = self;
-            let sim = simulate(&mut docs[*active].world, scripts, db, time, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud, meshes);
+            // A single step always runs exactly one tick, even with a fixed-rate clock.
+            let dt = match (self.step_once, dumb_runtime::clock_for(&self.project.settings)) {
+                (true, Some(c)) => c.dt(),
+                _ => dt,
+            };
+            let Editor { docs, active, scripts, db, time, sim_clock, input, physics, streamer, project, stats, hud, meshes, .. } = self;
+            let sim = dumb_runtime::simulate_frame(sim_clock, time, dt, &mut docs[*active].world, scripts, db, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud, meshes);
             db.apply_mesh_uploads(meshes);
             stats.ai = sim.ai;
             stats.stream = sim.stream;
+            self.hold_input = sim.ticks == 0;
             self.step_once = false;
         } else {
+            self.hold_input = false;
             self.doc().world.update_transforms();
         }
         self.stats.sim_ms = t0.elapsed().as_secs_f32() * 1000.0;
@@ -599,7 +610,9 @@ impl Editor {
         if self.docs.iter().map(|d| d.dirty).collect::<Vec<_>>() != was_dirty {
             self.update_title();
         }
-        self.input.end_frame();
+        if !self.hold_input {
+            self.input.end_frame();
+        }
     }
 
     /// Dev/testing hook: `DUMB_OPEN=prefs,console,scripts,material:Materials/Gold.mat,model:Characters/Player/Robot.blend`
@@ -670,6 +683,7 @@ impl Editor {
                 let snap = SceneData::capture(&self.doc().world);
                 self.play_snapshot = Some((self.active, snap));
                 self.time = Time::new();
+                self.sim_clock = None;
                 self.input.clear();
                 self.play = PlayMode::Playing;
                 let mut physics = dumb_physics::Physics::new(Vec3::from(self.project.settings.gravity));

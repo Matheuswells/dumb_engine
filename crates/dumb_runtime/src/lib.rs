@@ -34,6 +34,16 @@ pub struct ProjectSettings {
     /// Most physics steps per frame (prevents slow-motion spirals after hitches).
     #[serde(default = "default_physics_steps")]
     pub physics_max_steps: u32,
+    /// Simulation ticks per second, independent of the frame rate; 0 = one tick per frame.
+    #[serde(default)]
+    pub sim_hz: u32,
+    /// Most simulation ticks per frame when `sim_hz` is set (a hitch drops the rest).
+    #[serde(default = "default_sim_steps")]
+    pub sim_max_steps: u32,
+    /// Replayable simulation: fixed `1/sim_hz` tick (60 Hz if `sim_hz` is 0), `Time` derived
+    /// from the tick counter, `time_scale` ignored.
+    #[serde(default)]
+    pub deterministic: bool,
     /// Frame cap for the game; 0 = unlimited.
     #[serde(default)]
     pub max_fps: u32,
@@ -82,6 +92,10 @@ fn default_physics_hz() -> u32 {
     60
 }
 
+fn default_sim_steps() -> u32 {
+    5
+}
+
 fn default_physics_steps() -> u32 {
     4
 }
@@ -116,6 +130,9 @@ impl Default for ProjectSettings {
             gravity: default_gravity(),
             physics_hz: default_physics_hz(),
             physics_max_steps: default_physics_steps(),
+            sim_hz: 0,
+            sim_max_steps: default_sim_steps(),
+            deterministic: false,
             max_fps: 0,
             vsync: true,
             window_size: default_window(),
@@ -247,6 +264,8 @@ pub fn update_animators(world: &mut World, db: &AssetDatabase, dt: f32) {
 pub struct SimStats {
     pub ai: dumb_ecs::AiStats,
     pub stream: streaming::StreamStats,
+    /// Ticks `simulate_frame` ran this frame (0 on a fast frame with a fixed tick rate).
+    pub ticks: u32,
 }
 
 /// One simulation frame: world streaming, AI scheduling, scripts, physics, animation.
@@ -308,6 +327,67 @@ pub fn simulate(
     world.update_events();
     // HUD components draw after the scripts' own HUD commands.
     dumb_ecs::hud::collect_components(world, hud);
+    stats
+}
+
+/// The fixed-step clock the settings ask for, if any (`None` = one tick per frame).
+pub fn clock_for(settings: &ProjectSettings) -> Option<dumb_core::FixedClock> {
+    if settings.sim_hz == 0 && !settings.deterministic {
+        return None;
+    }
+    let hz = if settings.sim_hz == 0 { 60 } else { settings.sim_hz.clamp(1, 1000) };
+    Some(dumb_core::FixedClock::new(hz, settings.sim_max_steps, settings.deterministic))
+}
+
+/// Advance the clock by one rendered frame (`raw_dt` wall-clock seconds) and run the matching
+/// simulation ticks: one per frame without `sim_hz`, otherwise a whole number of fixed ticks
+/// (possibly none) separate from the frame rate. `time` is what scripts see for the last tick.
+/// Per-frame input edges are consumed by the first tick; the caller calls `end_frame` only when
+/// `SimStats::ticks > 0`, so a frame with no tick keeps its edges for the next one.
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_frame(
+    clock: &mut Option<dumb_core::FixedClock>,
+    time: &mut Time,
+    raw_dt: f32,
+    world: &mut World,
+    scripts: &mut ScriptHost,
+    db: &AssetDatabase,
+    input: &mut Input,
+    mut physics: Option<&mut dumb_physics::Physics>,
+    mut streamer: Option<&mut streaming::Streamer>,
+    settings: &ProjectSettings,
+    hud: &mut dumb_ecs::Hud,
+    meshes: &mut dumb_ecs::MeshUploads,
+) -> SimStats {
+    // Rebuild the clock when the settings changed (the editor edits them live).
+    let want = clock_for(settings);
+    let same = match (&*clock, &want) {
+        (Some(a), Some(b)) => a.hz == b.hz && a.max_steps == b.max_steps && a.deterministic == b.deterministic,
+        (None, None) => true,
+        _ => false,
+    };
+    if !same {
+        *clock = want;
+        if let Some(c) = clock.as_mut() {
+            c.resume(time);
+        }
+    }
+    let Some(c) = clock.as_mut() else {
+        time.advance(raw_dt);
+        let mut stats = simulate(world, scripts, db, time, input, physics, streamer, settings, hud, meshes);
+        stats.ticks = 1;
+        return stats;
+    };
+    let mut stats = SimStats::default();
+    let n = c.accumulate(raw_dt);
+    for i in 0..n {
+        if i > 0 {
+            input.end_frame();
+        }
+        *time = c.next_tick(time.time_scale);
+        stats = simulate(world, scripts, db, time, input, physics.as_deref_mut(), streamer.as_deref_mut(), settings, hud, meshes);
+    }
+    stats.ticks = n;
     stats
 }
 
