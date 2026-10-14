@@ -40,8 +40,11 @@ simulation):
   cores (rayon), also available to scripts.
 - ✅ Physics (Rapier: rigid bodies, colliders, character controller, raycasts and overlap
   queries from scripts, collision events).
-- Fixed-timestep simulation loop separate from rendering. Deterministic mode for
-  networking and replays.
+- ✅ Fixed-timestep simulation loop separate from rendering: `sim_hz` in the project settings
+  (Preferences ▸ Game tick rate) runs scripts, AI, streaming and animation a whole number of
+  ticks per frame (`FixedClock`, capped by `sim_max_steps`; 0 keeps one tick per frame). Deterministic
+  mode: fixed `1/hz` tick, `Time` derived from the tick counter, `time_scale` ignored. Streaming
+  budgets are wall-clock, so streamed content still arrives at frame-dependent times.
 - ✅ `Commands` (deferred spawn/despawn/insert, usable from parallel queries), typed events
   (`world.send_event` / `world.events::<E>()`, double-buffered per frame) and resources
   (singleton components: `world.resource::<T>()`, `insert_resource`, `resource_or_default`).
