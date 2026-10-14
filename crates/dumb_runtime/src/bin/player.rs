@@ -6,7 +6,7 @@
 
 use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Time};
-use dumb_ecs::{SceneData, World};
+use dumb_ecs::World;
 use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, world_skybox, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
 use dumb_runtime::{simulate, Project};
 use dumb_script::ScriptHost;
@@ -82,15 +82,7 @@ impl ApplicationHandler for App {
             log::warn!("scripts: {e}");
         }
         let scene = self.scene.clone().unwrap_or(self.project.settings.startup_scene.clone());
-        match db.id_for_path(&scene).and_then(|id| db.read_asset_text(id)) {
-            Some(text) => match SceneData::from_ron(&text) {
-                Ok(s) => {
-                    s.instantiate(&mut world);
-                }
-                Err(e) => log::error!("scene parse error: {e}"),
-            },
-            None => log::error!("scene `{scene}` not found"),
-        }
+        dumb_runtime::load_scene(&db, &mut world, &scene);
         db.update();
         let target = renderer.create_target(size.width.max(1), size.height.max(1));
         self.game = Some(Game {

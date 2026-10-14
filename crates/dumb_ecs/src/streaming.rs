@@ -38,6 +38,19 @@ impl Default for StreamingCell {
     }
 }
 
+/// Resource: the points the world streams cells and ranks AI distance LOD around. When it holds
+/// points they replace the primary camera, which a headless server doesn't have: the server
+/// sets one point per connected player (scripts can fill it too). Empty = follow the camera.
+#[derive(Component, Editor, Clone, Debug, Default, PartialEq)]
+pub struct StreamFocus {
+    pub points: Vec<dumb_core::Vec3>,
+}
+
+/// Distance from `p` to the nearest focus point (None when there are no points).
+pub fn focus_distance(focus: &[dumb_core::Vec3], p: dumb_core::Vec3) -> Option<f32> {
+    focus.iter().map(|f| f.distance(p)).min_by(f32::total_cmp)
+}
+
 /// Instantiates scene data a slice at a time so a big load doesn't stall a frame.
 pub struct IncrementalSpawn {
     data: Arc<SceneData>,

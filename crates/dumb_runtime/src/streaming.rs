@@ -1,4 +1,5 @@
-//! World streaming: loads `StreamingCell` scenes around the camera while the game runs.
+//! World streaming: loads `StreamingCell` scenes around the camera (or the players, on a server)
+//! while the game runs.
 //!
 //! Loading a cell has three stages, none of which may stall a frame:
 //! 1. read + parse the scene file on a worker thread,
@@ -41,17 +42,21 @@ pub struct Streamer {
 
 impl Streamer {
     /// Advance streaming. `budget` caps the main-thread time spent spawning/despawning.
-    pub fn update(&mut self, world: &mut World, db: &AssetDatabase, focus: Option<Vec3>, budget: Duration) -> StreamStats {
+    /// Cells load around the nearest `focus` point (the camera, or each player on a server);
+    /// with no points nothing changes.
+    pub fn update(&mut self, world: &mut World, db: &AssetDatabase, focus: &[Vec3], budget: Duration) -> StreamStats {
         let t0 = Instant::now();
         let mut stats = StreamStats::default();
-        let Some(focus) = focus else { return stats };
+        if focus.is_empty() {
+            return stats;
+        }
         let cells: Vec<(Entity, StreamingCell, Vec3)> =
             world.query_ref::<(Entity, &StreamingCell)>().map(|(e, c)| (e, c.clone(), world.global_matrix(e).w_axis.truncate())).collect();
         stats.cells = cells.len() as u32;
 
         // Decide loads/unloads.
         for (e, cell, pos) in &cells {
-            let d = pos.distance(focus);
+            let d = dumb_ecs::streaming::focus_distance(focus, *pos).unwrap_or(f32::INFINITY);
             let active = self.jobs.contains_key(e) && !matches!(self.jobs.get(e), Some(Job::Unloading(_)));
             if !active && d <= cell.load_distance && !cell.scene.is_none() {
                 if let Some(Job::Unloading(rest)) = self.jobs.remove(e) {
@@ -187,13 +192,13 @@ mod tests {
         let budget = Duration::from_micros(500);
 
         // Far away: nothing happens.
-        s.update(&mut w, &db, Some(Vec3::ZERO), budget);
+        s.update(&mut w, &db, &[Vec3::ZERO], budget);
         assert_eq!(w.entity_count(), 1);
 
         // Close: loads over several frames.
         let mut frames = 0;
         while w.get::<StreamingCell>(cell).unwrap().state != 2 {
-            s.update(&mut w, &db, Some(Vec3::new(90.0, 0.0, 0.0)), budget);
+            s.update(&mut w, &db, &[Vec3::new(90.0, 0.0, 0.0)], budget);
             frames += 1;
             std::thread::sleep(Duration::from_millis(1));
             assert!(frames < 10_000, "never finished loading");
@@ -204,12 +209,15 @@ mod tests {
         assert_eq!(any, Some(cell));
 
         // Between load and unload distance: stays loaded.
-        s.update(&mut w, &db, Some(Vec3::new(30.0, 0.0, 0.0)), budget);
+        s.update(&mut w, &db, &[Vec3::new(30.0, 0.0, 0.0)], budget);
+        assert_eq!(w.get::<StreamingCell>(cell).unwrap().state, 2);
+        // Several players (a server): the nearest one keeps it loaded.
+        s.update(&mut w, &db, &[Vec3::new(-500.0, 0.0, 0.0), Vec3::new(30.0, 0.0, 0.0)], budget);
         assert_eq!(w.get::<StreamingCell>(cell).unwrap().state, 2);
 
         // Far: unloads.
         for _ in 0..10_000 {
-            s.update(&mut w, &db, Some(Vec3::new(-100.0, 0.0, 0.0)), budget);
+            s.update(&mut w, &db, &[Vec3::new(-100.0, 0.0, 0.0)], budget);
             if w.entity_count() == 1 {
                 break;
             }

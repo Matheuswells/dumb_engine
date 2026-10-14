@@ -50,12 +50,13 @@ simulation):
 ## 3.1 Dedicated server and replication
 Authoritative multiplayer for persistent shared worlds (MMO-scale sandboxes): one headless
 server owns the simulation, clients render and send input.
-- Headless server build: a `render` feature on `dumb_runtime` so the simulation, physics,
-  scripts and scene/asset loading compile without `dumb_render`, winit, egui or wry, plus a
-  `dumb-server` binary that runs a project with no window or GPU (assets load as data only).
-  `simulate()` currently calls `dumb_render::find_primary_camera` for the streaming focus, so
-  that moves behind a focus provider (per-client positions on the server), and `dumb-player`
-  gets `required-features = ["render"]`.
+- ✅ Headless server build: a `render` feature (on by default) on `dumb_runtime`, so the
+  simulation, physics, scripts and scene/asset loading compile without `dumb_render`, winit,
+  egui or wry (`cargo build -p dumb_runtime --no-default-features --bin dumb-server`). The
+  `dumb-server` binary runs a project with no window or GPU at a fixed tick rate (`--hz`), loads
+  models as data for colliders and animation, and stops cleanly on Ctrl+C / SIGTERM. Streaming
+  and AI LOD follow the `StreamFocus` resource (several points, the nearest one wins: one per
+  client) and fall back to the primary camera. Next: a server option in Build & Export.
 - Authoritative fixed tick: the server runs `simulate()` at a fixed rate (e.g. 30 Hz) apart
   from any frame rate, stamps state with a tick number, and exposes `is_server()` /
   `is_client()` so scripts can gate logic. Builds on the fixed-timestep loop above.

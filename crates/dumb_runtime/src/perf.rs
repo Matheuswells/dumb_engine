@@ -1,11 +1,17 @@
 //! Performance data for overlays and the profiler: system RAM/CPU (sampled), GPU time and VRAM,
-//! and the on-screen performance overlay shared by the editor and the game.
+//! and the on-screen performance overlay shared by the editor and the game. Only the settings
+//! types build without the `render` feature.
 
+#[cfg(feature = "render")]
 use dumb_core::profiler;
+#[cfg(feature = "render")]
 use dumb_render::{RenderStats, Renderer};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "render")]
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "render")]
+use std::time::Instant;
 
 /// Samples kept by the system monitor (one every `SAMPLE_EVERY`).
 pub const SAMPLES: usize = 240;
@@ -30,6 +36,7 @@ pub struct SystemSample {
     pub gpu_busy: f32,
 }
 
+#[cfg(feature = "render")]
 pub struct SystemMonitor {
     /// Latest CPU/RAM numbers, written by a sampling thread: on Windows reading the process's
     /// numbers takes ~7 ms, a stutter twice a second if done on the frame.
@@ -39,12 +46,14 @@ pub struct SystemMonitor {
     pub history: VecDeque<SystemSample>,
 }
 
+#[cfg(feature = "render")]
 impl Default for SystemMonitor {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "render")]
 impl SystemMonitor {
     pub fn new() -> Self {
         let os = std::sync::Arc::new(std::sync::Mutex::new(SystemSample::default()));
@@ -142,6 +151,7 @@ pub struct OverlayExtras {
 }
 
 /// Draw the overlay in the top-left corner of `rect`.
+#[cfg(feature = "render")]
 pub fn overlay(ui: &mut egui::Ui, rect: egui::Rect, mode: PerfOverlay, mon: &SystemMonitor, rs: &RenderStats, extras: &OverlayExtras) {
     if mode == PerfOverlay::Off {
         return;
@@ -215,6 +225,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: egui::Rect, mode: PerfOverlay, mon: &Sys
 }
 
 /// Bars of recent frame times (CPU) with the GPU time drawn as a line.
+#[cfg(feature = "render")]
 pub fn frame_graph(ui: &mut egui::Ui, history: &[profiler::FrameRecord], w: f32, h: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
     let p = ui.painter_at(rect);
