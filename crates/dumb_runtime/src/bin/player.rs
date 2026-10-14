@@ -150,7 +150,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let dt = g.last.elapsed().as_secs_f32();
                 g.last = Instant::now();
-                                g.db.update();
+                g.db.update();
                 g.scripts.update(&mut [&mut g.world]);
                 g.sim = simulate_frame(&mut g.clock, &mut g.time, dt, &mut g.world, &mut g.scripts, &g.db, &mut g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes);
                 g.db.apply_mesh_uploads(&mut g.meshes);
@@ -210,7 +210,10 @@ impl ApplicationHandler for App {
                 let mut delta = out.textures_delta;
                 delta.clear();
                 drop(_render);
-                g.input.end_frame();
+                // A frame without a tick keeps its input edges for the next one.
+                if g.sim.ticks > 0 {
+                    g.input.end_frame();
+                }
                 {
                     dumb_core::profile_scope!("frame cap wait");
                     g.limiter.wait(g.max_fps);

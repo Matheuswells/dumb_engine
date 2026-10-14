@@ -198,6 +198,8 @@ pub struct Editor {
     time: Time,
     sim_clock: Option<dumb_core::FixedClock>,
     step_once: bool,
+    /// The last play frame ran no tick, so its input edges must survive `post_frame`.
+    hold_input: bool,
     input: Input,
     game_focused: bool,
     /// The pointer was over the game view last frame (not covered by a window).
@@ -313,6 +315,7 @@ impl Editor {
             time: Time::new(),
             sim_clock: None,
             step_once: false,
+            hold_input: false,
             input: Input::default(),
             game_focused: false,
             game_hovered: false,
@@ -562,8 +565,10 @@ impl Editor {
             db.apply_mesh_uploads(meshes);
             stats.ai = sim.ai;
             stats.stream = sim.stream;
+            self.hold_input = sim.ticks == 0;
             self.step_once = false;
         } else {
+            self.hold_input = false;
             self.doc().world.update_transforms();
         }
         self.stats.sim_ms = t0.elapsed().as_secs_f32() * 1000.0;
@@ -605,7 +610,9 @@ impl Editor {
         if self.docs.iter().map(|d| d.dirty).collect::<Vec<_>>() != was_dirty {
             self.update_title();
         }
-        self.input.end_frame();
+        if !self.hold_input {
+            self.input.end_frame();
+        }
     }
 
     /// Dev/testing hook: `DUMB_OPEN=prefs,console,scripts,material:Materials/Gold.mat,model:Characters/Player/Robot.blend`

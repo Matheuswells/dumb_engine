@@ -264,6 +264,8 @@ pub fn update_animators(world: &mut World, db: &AssetDatabase, dt: f32) {
 pub struct SimStats {
     pub ai: dumb_ecs::AiStats,
     pub stream: streaming::StreamStats,
+    /// Ticks `simulate_frame` ran this frame (0 on a fast frame with a fixed tick rate).
+    pub ticks: u32,
 }
 
 /// One simulation frame: world streaming, AI scheduling, scripts, physics, animation.
@@ -340,7 +342,8 @@ pub fn clock_for(settings: &ProjectSettings) -> Option<dumb_core::FixedClock> {
 /// Advance the clock by one rendered frame (`raw_dt` wall-clock seconds) and run the matching
 /// simulation ticks: one per frame without `sim_hz`, otherwise a whole number of fixed ticks
 /// (possibly none) separate from the frame rate. `time` is what scripts see for the last tick.
-/// Per-frame input edges are consumed by the first tick; the caller still calls `end_frame`.
+/// Per-frame input edges are consumed by the first tick; the caller calls `end_frame` only when
+/// `SimStats::ticks > 0`, so a frame with no tick keeps its edges for the next one.
 #[allow(clippy::too_many_arguments)]
 pub fn simulate_frame(
     clock: &mut Option<dumb_core::FixedClock>,
@@ -371,7 +374,9 @@ pub fn simulate_frame(
     }
     let Some(c) = clock.as_mut() else {
         time.advance(raw_dt);
-        return simulate(world, scripts, db, time, input, physics, streamer, settings, hud, meshes);
+        let mut stats = simulate(world, scripts, db, time, input, physics, streamer, settings, hud, meshes);
+        stats.ticks = 1;
+        return stats;
     };
     let mut stats = SimStats::default();
     let n = c.accumulate(raw_dt);
@@ -382,6 +387,7 @@ pub fn simulate_frame(
         *time = c.next_tick(time.time_scale);
         stats = simulate(world, scripts, db, time, input, physics.as_deref_mut(), streamer.as_deref_mut(), settings, hud, meshes);
     }
+    stats.ticks = n;
     stats
 }
 
