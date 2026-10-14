@@ -196,6 +196,7 @@ pub struct Editor {
     play: PlayMode,
     play_snapshot: Option<(usize, SceneData)>,
     time: Time,
+    sim_clock: Option<dumb_core::FixedClock>,
     step_once: bool,
     input: Input,
     game_focused: bool,
@@ -310,6 +311,7 @@ impl Editor {
             play: PlayMode::Edit,
             play_snapshot: None,
             time: Time::new(),
+            sim_clock: None,
             step_once: false,
             input: Input::default(),
             game_focused: false,
@@ -550,9 +552,13 @@ impl Editor {
 
         let t0 = Instant::now();
         if self.play == PlayMode::Playing || self.step_once {
-            self.time.advance(dt);
-            let Editor { docs, active, scripts, db, time, input, physics, streamer, project, stats, hud, meshes, .. } = self;
-            let sim = simulate(&mut docs[*active].world, scripts, db, time, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud, meshes);
+            // A single step always runs exactly one tick, even with a fixed-rate clock.
+            let dt = match (self.step_once, dumb_runtime::clock_for(&self.project.settings)) {
+                (true, Some(c)) => c.dt(),
+                _ => dt,
+            };
+            let Editor { docs, active, scripts, db, time, sim_clock, input, physics, streamer, project, stats, hud, meshes, .. } = self;
+            let sim = dumb_runtime::simulate_frame(sim_clock, time, dt, &mut docs[*active].world, scripts, db, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud, meshes);
             db.apply_mesh_uploads(meshes);
             stats.ai = sim.ai;
             stats.stream = sim.stream;
@@ -670,6 +676,7 @@ impl Editor {
                 let snap = SceneData::capture(&self.doc().world);
                 self.play_snapshot = Some((self.active, snap));
                 self.time = Time::new();
+                self.sim_clock = None;
                 self.input.clear();
                 self.play = PlayMode::Playing;
                 let mut physics = dumb_physics::Physics::new(Vec3::from(self.project.settings.gravity));

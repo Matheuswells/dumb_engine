@@ -12,7 +12,7 @@ pub mod profiler;
 mod time;
 
 pub use input::{Input, Key, MouseButton};
-pub use time::Time;
+pub use time::{FixedClock, Time};
 
 use serde::{Deserialize, Serialize};
 
