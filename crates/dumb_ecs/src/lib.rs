@@ -8,6 +8,7 @@ extern crate self as dumb_ecs;
 
 mod blob;
 pub mod ai;
+pub mod anim;
 pub mod commands;
 pub mod components;
 pub mod hud;
@@ -19,6 +20,7 @@ pub mod streaming;
 mod world;
 
 pub use ai::{AiAgent, AiSettings, AiStats};
+pub use anim::{AnimEvent, AnimGraphPlayer, IkConstraint, LookAtConstraint, SpringChain};
 pub use commands::Commands;
 pub use hud::{Anchor, Hud, HudCmd, HudPos, UiBar, UiButton, UiImage, UiPanel, UiText, UiWeb, UiWorldLabel};
 pub use meshes::{MeshPart, MeshUploads, RuntimeMesh};

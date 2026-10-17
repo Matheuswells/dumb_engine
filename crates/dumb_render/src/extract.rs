@@ -4,7 +4,7 @@ use crate::types::*;
 use dumb_asset::model::Trs;
 use dumb_asset::{AssetDatabase, ModelData};
 use dumb_core::{AssetId, Color, Entity, Frustum, Mat4, Vec3};
-use dumb_ecs::{Animator, Camera, Light, LightKind, MeshRenderer, World};
+use dumb_ecs::{Camera, Light, LightKind, MeshRenderer, World};
 
 #[derive(Default)]
 pub struct ExtractOptions<'a> {
@@ -47,18 +47,14 @@ pub fn extract_world(world: &World, db: &mut AssetDatabase, view: &mut RenderVie
         view.lighting.points = points;
     }
 
-    for (e, mr, anim) in world.query_ref::<(Entity, &MeshRenderer, Option<&Animator>)>() {
+    for (e, mr) in world.query_ref::<(Entity, &MeshRenderer)>() {
         if !mr.visible || mr.model.is_none() {
             continue;
         }
         let Some(model) = db.model(mr.model) else { continue };
         let selected = opts.selected.iter().any(|s| *s == e || world.is_ancestor(*s, e));
         let world_m = world.global_matrix(e);
-        let pose = anim.and_then(|a| {
-            let clip = model.find_clip(&a.clip)?;
-            let blend = model.find_clip(&a.blend_clip).filter(|_| !a.blend_clip.is_empty()).map(|b| (b, a.time, a.blend));
-            Some(model.sample_pose(Some((clip, a.time)), blend))
-        });
+        let pose = crate::animation::entity_pose(world, db, e, &model);
         let first = view.draws.len();
         culled += push_model(view, &model, mr.model, mr.material, world_m, mr.tint, pose.as_deref(), selected, opts.frustum_cull.then_some(&frustum));
         if !mr.cast_shadows {

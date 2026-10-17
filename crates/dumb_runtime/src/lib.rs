@@ -2,7 +2,7 @@
 
 use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Key, MouseButton, Time};
-use dumb_ecs::{Animator, MeshRenderer, World};
+use dumb_ecs::World;
 use dumb_script::{ScriptContext, ScriptHost};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -221,24 +221,7 @@ pub fn strip_unc(p: &Path) -> PathBuf {
     PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(&s).to_string())
 }
 
-/// Advance `Animator` time and wrap/clamp by clip length.
-pub fn update_animators(world: &mut World, db: &AssetDatabase, dt: f32) {
-    for (anim, mr) in world.query::<(&mut Animator, &MeshRenderer)>() {
-        if !anim.playing {
-            continue;
-        }
-        anim.time += dt * anim.speed;
-        let Some(model) = db.model_loaded(mr.model) else { continue };
-        let Some(ci) = model.find_clip(&anim.clip) else { continue };
-        let dur = model.animations[ci].duration.max(1e-3);
-        if anim.looping {
-            anim.time = anim.time.rem_euclid(dur);
-        } else if anim.time > dur {
-            anim.time = dur;
-            anim.playing = false;
-        }
-    }
-}
+pub use dumb_render::animation::update_animators;
 
 /// One simulation step: scripts, animation, transform propagation.
 /// One simulation step: scripts, physics, animation, transform propagation.

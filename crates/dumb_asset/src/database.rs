@@ -25,6 +25,7 @@ pub enum AssetKind {
     Audio,
     Script,
     Shader,
+    AnimGraph,
     Other,
 }
 
@@ -41,6 +42,7 @@ impl AssetKind {
             "wav" | "ogg" | "mp3" | "flac" => AssetKind::Audio,
             "rs" => AssetKind::Script,
             "wgsl" => AssetKind::Shader,
+            "animgraph" => AssetKind::AnimGraph,
             _ => AssetKind::Other,
         }
     }
@@ -56,6 +58,7 @@ impl AssetKind {
             AssetKind::Audio => "audio",
             AssetKind::Script => "script",
             AssetKind::Shader => "shader",
+            AssetKind::AnimGraph => "animgraph",
             AssetKind::Other => "other",
         }
     }
@@ -70,6 +73,7 @@ impl AssetKind {
             AssetKind::Audio => "🔊",
             AssetKind::Script => "📜",
             AssetKind::Shader => "✨",
+            AssetKind::AnimGraph => "🎞",
             AssetKind::Other => "📄",
         }
     }
@@ -254,6 +258,7 @@ pub struct AssetDatabase {
     models: HashMap<AssetId, Arc<ModelData>>,
     textures: HashMap<AssetId, Arc<TextureData>>,
     materials: HashMap<AssetId, MaterialData>,
+    anim_graphs: std::sync::Mutex<HashMap<AssetId, (SystemTime, Option<Arc<crate::anim::AnimGraph>>)>>,
     /// Versions of in-memory materials that have no file (editor previews).
     virtual_versions: HashMap<AssetId, u64>,
     /// Models scripts made at runtime (`set_runtime_mesh`), and those removed since renderers
@@ -337,6 +342,7 @@ impl AssetDatabase {
             models: HashMap::new(),
             textures: HashMap::new(),
             materials: HashMap::new(),
+            anim_graphs: Default::default(),
             virtual_versions: HashMap::new(),
             runtime_meshes: HashSet::new(),
             removed_models: Vec::new(),
@@ -827,6 +833,33 @@ impl AssetDatabase {
         }
         self.load(id);
         None
+    }
+
+    /// Parsed `.animgraph` asset, re-read when the file changes. `None` if missing or invalid
+    /// (the error is logged once per change).
+    pub fn anim_graph(&self, id: AssetId) -> Option<Arc<crate::anim::AnimGraph>> {
+        let e = self.entries.get(&id).filter(|e| e.kind == AssetKind::AnimGraph)?;
+        let path = self.assets_root.join(&e.path);
+        let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+        let mut cache = self.anim_graphs.lock().ok()?;
+        if let Some((t, g)) = cache.get(&id) {
+            if *t == mtime {
+                return g.clone();
+            }
+        }
+        let parsed = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| crate::anim::AnimGraph::from_json(&s));
+        match parsed {
+            Ok(g) => {
+                let g = Arc::new(g);
+                cache.insert(id, (mtime, Some(g.clone())));
+                Some(g)
+            }
+            Err(err) => {
+                log::warn!("animation graph {}: {err}", e.path);
+                cache.insert(id, (mtime, None));
+                None
+            }
+        }
     }
 
     pub fn material(&mut self, id: AssetId) -> Option<MaterialData> {

@@ -184,6 +184,13 @@ impl GraphPlayer {
         GraphPlayer { current: graph.entry_index(), cycles: 0.0, fading: None, initialized: true }
     }
 
+    /// Rebuild a player from saved component fields (state names instead of indices).
+    pub fn restore(graph: &AnimGraph, state: &str, cycles: f32, fade: Option<(&str, f32, f32, f32)>) -> GraphPlayer {
+        let current = graph.state_index(state).unwrap_or_else(|| graph.entry_index());
+        let fading = fade.and_then(|(n, c, p, d)| graph.state_index(n).map(|i| (i, c, p, d)));
+        GraphPlayer { current, cycles, fading, initialized: true }
+    }
+
     pub fn current_name<'a>(&self, graph: &'a AnimGraph) -> &'a str {
         graph.states.get(self.current).map_or("", |s| s.name.as_str())
     }
@@ -581,7 +588,10 @@ pub fn pelvis_offset(foot_ys: &[f32], target_ys: &[f32]) -> f32 {
 }
 
 /// Spring-bone chain simulation (hair, tails, cloth strips): each bone's tip follows its rest
-/// position with inertia, damped, and keeps a fixed bone length (verlet integration).
+/// Spring-bone state for one node (hair, tails, capes): the tip follows its animated rest
+/// position with inertia and damping and keeps a fixed bone length (verlet integration).
+/// `simulate` advances the state (runtime); `apply` turns the node towards the tip (pure, used
+/// when building poses for rendering).
 #[derive(Clone, Debug)]
 pub struct SpringBone {
     pub node: usize,
@@ -589,9 +599,9 @@ pub struct SpringBone {
     pub damping: f32,
     pub gravity: Vec3,
     /// Verlet state: current and previous tip positions in model space.
-    tip: Vec3,
-    prev: Vec3,
-    primed: bool,
+    pub tip: Vec3,
+    pub prev: Vec3,
+    pub primed: bool,
 }
 
 impl SpringBone {
@@ -599,12 +609,16 @@ impl SpringBone {
         SpringBone { node, stiffness, damping, gravity, tip: Vec3::ZERO, prev: Vec3::ZERO, primed: false }
     }
 
-    /// Simulate one step and rotate the node so its `bone_axis` (local, pointing to the tip)
-    /// follows the simulated tip. `bone_len` is the distance from the node to its tip.
-    pub fn step(&mut self, model: &ModelData, pose: &mut [Trs], bone_axis: Vec3, bone_len: f32, dt: f32) {
+    fn head(&self, model: &ModelData, pose: &[Trs], bone_axis: Vec3) -> (Vec3, Vec3) {
         let globals = model.global_matrices(pose);
         let (_, rot, pos) = globals[self.node].to_scale_rotation_translation();
-        let rest_dir = rot * bone_axis.normalize_or(Vec3::Y);
+        (pos, rot * bone_axis.normalize_or(Vec3::Y))
+    }
+
+    /// Advance the simulation one step against the animated `pose` (without this node's spring
+    /// rotation). `bone_axis` is the local direction to the tip, `bone_len` its distance.
+    pub fn simulate(&mut self, model: &ModelData, pose: &[Trs], bone_axis: Vec3, bone_len: f32, dt: f32) {
+        let (pos, rest_dir) = self.head(model, pose, bone_axis);
         let rest_tip = pos + rest_dir * bone_len;
         if !self.primed {
             self.tip = rest_tip;
@@ -619,8 +633,22 @@ impl SpringBone {
         // Constrain to the bone length around the (moving) head.
         let d = (next - pos).normalize_or(rest_dir);
         self.tip = pos + d * bone_len;
-        let q = rot_between(rest_dir, d);
-        rotate_node_global(model, pose, self.node, q);
+    }
+
+    /// Rotate the node so its `bone_axis` points at the simulated tip.
+    pub fn apply(&self, model: &ModelData, pose: &mut [Trs], bone_axis: Vec3) {
+        if !self.primed {
+            return;
+        }
+        let (pos, rest_dir) = self.head(model, pose, bone_axis);
+        let want = (self.tip - pos).normalize_or(rest_dir);
+        rotate_node_global(model, pose, self.node, rot_between(rest_dir, want));
+    }
+
+    /// `simulate` then `apply`.
+    pub fn step(&mut self, model: &ModelData, pose: &mut [Trs], bone_axis: Vec3, bone_len: f32, dt: f32) {
+        self.simulate(model, pose, bone_axis, bone_len, dt);
+        self.apply(model, pose, bone_axis);
     }
 }
 
