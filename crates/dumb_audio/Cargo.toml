@@ -1,0 +1,9 @@
+[package]
+name = "dumb_audio"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+log.workspace = true
+libloading.workspace = true
+symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis", "wav", "flac", "mp3", "pcm"] }

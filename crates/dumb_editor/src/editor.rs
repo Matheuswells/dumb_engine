@@ -258,6 +258,8 @@ pub struct Editor {
     physics: Option<dumb_physics::Physics>,
     /// World streaming while playing (reset on stop).
     streamer: Option<dumb_runtime::streaming::Streamer>,
+    /// Sound for play mode; opened when play starts, dropped when it stops.
+    audio: Option<dumb_runtime::audio::AudioSystem>,
     /// MCP tool calls that finish on a later frame (script builds, captures...).
     mcp_waiting: Vec<mcp_tools::Waiting>,
     /// Frames still to step for the MCP `step` tool.
@@ -358,6 +360,7 @@ impl Editor {
             pointer_down: false,
             physics: None,
             streamer: None,
+            audio: None,
             mcp_waiting: Vec::new(),
             mcp_steps: 0,
             updater: Default::default(),
@@ -557,7 +560,17 @@ impl Editor {
             stats.ai = sim.ai;
             stats.stream = sim.stream;
             self.step_once = false;
+            let Editor { docs, active, db, audio, .. } = self;
+            if let Some(a) = audio {
+                a.set_paused(false);
+                a.update(&mut docs[*active].world, db, dt);
+            }
         } else {
+            let Editor { docs, active, db, audio, .. } = self;
+            if let Some(a) = audio {
+                a.set_paused(true);
+                a.update(&mut docs[*active].world, db, 0.0);
+            }
             self.doc().world.update_transforms();
         }
         self.stats.sim_ms = t0.elapsed().as_secs_f32() * 1000.0;
@@ -676,6 +689,7 @@ impl Editor {
                 self.project.configure_physics(&mut physics);
                 self.physics = Some(physics);
                 self.streamer = Some(Default::default());
+                self.audio = Some(dumb_runtime::audio::AudioSystem::new());
                 if self.settings.clear_console_on_play {
                     if let Ok(mut b) = self.log.0.lock() {
                         b.clear();
@@ -704,6 +718,7 @@ impl Editor {
         self.play = PlayMode::Edit;
         self.physics = None;
         self.streamer = None;
+        self.audio = None;
         // Meshes scripts made while playing belong to the run that ended.
         self.meshes = Default::default();
         self.db.clear_runtime_meshes();

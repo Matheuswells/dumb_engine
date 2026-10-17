@@ -45,7 +45,12 @@ simulation):
 - ✅ `Commands` (deferred spawn/despawn/insert, usable from parallel queries), typed events
   (`world.send_event` / `world.events::<E>()`, double-buffered per frame) and resources
   (singleton components: `world.resource::<T>()`, `insert_resource`, `resource_or_default`).
-- Audio (spatial, streaming). Networking: see 3.1.
+- ✅ Audio (`dumb_audio`): `AudioSource` / `AudioListener` components, a software mixer with 3D
+  positioning (distance attenuation, equal-power panning, Doppler), pitch, looping, a voice limit
+  that steals the quietest voice, clips decoded on worker threads and long sounds streamed from
+  disk (wav, ogg, flac, mp3). Output goes through ALSA loaded at runtime; with no device it stays
+  silent but keeps time. Scripts play a sound by setting `playing`. Next: mixer buses/effects,
+  Windows/macOS output backends. Networking: see 3.1.
 
 ## 3.1 Dedicated server and replication
 Authoritative multiplayer for persistent shared worlds (MMO-scale sandboxes): one headless

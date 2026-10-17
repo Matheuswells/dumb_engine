@@ -283,6 +283,8 @@ pub(crate) fn register_builtin(w: &mut World) {
     w.register_type::<Animator>();
     w.register_type::<PrefabInstance>();
     w.register_type::<crate::ai::AiAgent>();
+    w.register_type::<crate::audio::AudioSource>();
+    w.register_type::<crate::audio::AudioListener>();
     w.register_type::<crate::streaming::StreamingCell>();
     w.register_type::<crate::hud::UiText>();
     w.register_type::<crate::hud::UiBar>();
