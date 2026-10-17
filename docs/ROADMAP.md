@@ -68,7 +68,11 @@ server owns the simulation, clients render and send input.
   Also in `dumb_net` (not yet wired to `AiAgent`/replication): `SpatialGrid` and the
   per-connection `Interest` set (spawn/despawn with hysteresis, distance-prioritized budget),
   and session security: keyed address-cookie challenge (no amplification), pluggable token
-  authentication, per-connection packet rate limit. Still open: world save/restore.
+  authentication, per-connection packet rate limit. Replication codec in `dumb_net`: snapshot diff (field-level patches), compact binary
+  encoding hardened against hostile input, server→client entity id mapping (incl. references
+  inside values), jitter-buffer interpolation, atomic world save/load. Still open: runtime
+  wiring (`Replicated` component, per-tick send, `is_server()`), prediction/reconciliation,
+  client input/RPC validation, authoritative fixed tick (needs PR #4).
 - Replication: a `Replicated` component marks entities. Each tick the server diffs their
   reflected components (the same `Value` path as scenes) and sends delta snapshots with
   server→client entity id mapping (including entity references inside component values).

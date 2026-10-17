@@ -8,6 +8,7 @@
 
 mod emulator;
 mod interest;
+mod replication;
 mod endpoint;
 mod socket;
 mod wire;
@@ -15,4 +16,5 @@ mod wire;
 pub use emulator::{Emulated, EmulatorConfig};
 pub use interest::{Interest, InterestUpdate, SpatialGrid};
 pub use endpoint::{Channel, Client, ClientState, ConnectionId, NetConfig, NetEvent, Server};
+pub use replication::{load_snapshot, save_snapshot, decode_delta, encode_delta, apply_delta, diff, Delta, EntityMap, JitterBuffer, NetId, Op, Snapshot};
 pub use socket::{bind_udp, Datagram, MemNet, MemSocket};
