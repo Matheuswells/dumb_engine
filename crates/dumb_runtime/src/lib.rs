@@ -7,6 +7,7 @@ use dumb_script::{ScriptContext, ScriptHost};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+pub mod audio;
 pub mod export;
 pub mod hud_view;
 pub mod perf;

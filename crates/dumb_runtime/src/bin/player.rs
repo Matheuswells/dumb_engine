@@ -43,6 +43,7 @@ struct Game {
     hud_input: dumb_runtime::HudInputFilter,
     hud_view: dumb_runtime::hud_view::HudView,
     web: dumb_runtime::web::WebLayer,
+    audio: dumb_runtime::audio::AudioSystem,
 }
 
 struct App {
@@ -126,6 +127,7 @@ impl ApplicationHandler for App {
             hud_input: Default::default(),
             hud_view: Default::default(),
             web: dumb_runtime::web::WebLayer::new(&self.project.root),
+            audio: dumb_runtime::audio::AudioSystem::new(),
         });
     }
 
@@ -153,6 +155,7 @@ impl ApplicationHandler for App {
                 g.scripts.update(&mut [&mut g.world]);
                 g.sim = simulate(&mut g.world, &mut g.scripts, &g.db, &g.time, &g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes);
                 g.db.apply_mesh_uploads(&mut g.meshes);
+                g.audio.update(&mut g.world, &g.db, dt);
 
                 let size = g.window.inner_size();
                 g.renderer.resize_target(g.target, size.width.max(1), size.height.max(1));

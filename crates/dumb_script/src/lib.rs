@@ -45,7 +45,7 @@ pub mod prelude {
     pub use log::{debug, error, info, trace, warn};
     pub use dumb_core::{builtin, AssetId, Color, Entity, EulerRot, Input, Key, Mat4, MouseButton, Quat, Time, Vec2, Vec3, Vec4};
     pub use dumb_ecs::{
-        AiAgent, Anchor, Animator, BodyType, Camera, CharacterController, Commands, Hud, HudPos, StreamingCell, UiBar, UiButton, UiImage,
+        AiAgent, Anchor, AudioListener, AudioSource, Animator, BodyType, Camera, CharacterController, Commands, Hud, HudPos, StreamingCell, UiBar, UiButton, UiImage,
         UiPanel, UiText, UiWeb, UiWorldLabel, Collider, ColliderShape, Component, Editor, Light, LightKind, MeshRenderer, Name,
         MeshPart, MeshUploads, Parent, RigidBody, RuntimeMesh, Transform, With, Without, World,
     };

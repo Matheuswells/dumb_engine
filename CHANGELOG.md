@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Audio
+- **Spatial and streaming audio.** New `AudioSource` (clip, volume, pitch, looping, 3D on/off,
+  min/max distance, stream, play on start) and `AudioListener` components. Sounds are positioned
+  around the listener (or the primary camera) with distance attenuation, panning and Doppler.
+  Short clips are decoded on a worker thread; `stream` decodes long files while they play.
+  Scripts start and stop a sound by setting `playing`. Supports wav, ogg, flac and mp3. Plays in
+  the editor's play mode (paused with it) and in the player. Linux output uses ALSA, loaded at
+  runtime, so nothing extra is needed to build.
+
 ## v0.3.3
 
 Scripts must be rebuilt (ABI abi-10); the editor does it on its own.
