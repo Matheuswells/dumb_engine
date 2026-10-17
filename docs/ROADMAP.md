@@ -60,38 +60,39 @@ server owns the simulation, clients render and send input.
   models as data for colliders and animation, and stops cleanly on Ctrl+C / SIGTERM. Streaming
   and AI LOD follow the `StreamFocus` resource (several points, the nearest one wins: one per
   client) and fall back to the primary camera. Next: a server option in Build & Export.
-- Authoritative fixed tick: the server runs `simulate()` at a fixed rate (e.g. 30 Hz) apart
-  from any frame rate, stamps state with a tick number, and exposes `is_server()` /
-  `is_client()` so scripts can gate logic. Builds on the fixed-timestep loop above.
-- Transport: UDP with reliable-ordered and unreliable channels, sequence numbers, connect /
-  disconnect / reconnect surfaced to scripts as typed events, and a debug network emulator
-  (latency, jitter, loss, reordering) for testing.
-  *Done so far:* the `dumb_net` crate (UDP/in-memory sockets, reliable-ordered + unreliable
-  channels, session reconnect, `NetEvent`s, `Emulated` socket). Still to do: wiring the events
-  into the runtime/scripts.
-  Also in `dumb_net` (not yet wired to `AiAgent`/replication): `SpatialGrid` and the
-  per-connection `Interest` set (spawn/despawn with hysteresis, distance-prioritized budget),
-  and session security: keyed address-cookie challenge (no amplification), pluggable token
-  authentication, per-connection packet rate limit. Replication codec in `dumb_net`: snapshot diff (field-level patches), compact binary
-  encoding hardened against hostile input, server→client entity id mapping (incl. references
-  inside values), jitter-buffer interpolation, atomic world save/load, a generic `Predictor` (prediction +
-  reconciliation) and a `CommandGate` (ownership, per-tick rate, ordering, validation). Still open: runtime
-  wiring (`Replicated` component, per-tick send, `is_server()`), authoritative fixed tick (needs PR #4).
-- Replication: a `Replicated` component marks entities. Each tick the server diffs their
-  reflected components (the same `Value` path as scenes) and sends delta snapshots with
-  server→client entity id mapping (including entity references inside component values).
-  Clients apply them and interpolate through a jitter buffer; client-side prediction with
-  server reconciliation for the owned character.
-- Interest management: a spatial hash grid resource (also usable for gameplay queries), a
-  per-connection area of interest so clients only receive nearby entities (spawn/despawn on
-  enter/leave), and a per-connection bandwidth budget prioritized by distance, like the
-  `AiAgent` LOD bands.
-- Client input and RPCs: clients send input commands, never replicated state. The server
-  validates every command (the trust boundary), and scripts get typed client→server and
-  server→client messages with per-entity ownership.
-- Session security and persistence: connection handshake with authentication and a cookie
-  challenge against UDP spoofing/amplification, per-connection rate limits, and periodic
-  world save/restore on the server so the shared world survives restarts.
+- ✅ Authoritative fixed tick: `dumb-server` runs `simulate()` at a fixed rate (`--hz`, 30 by
+  default) apart from any frame rate, and stamps state with a tick number (`NetSession.tick`).
+  `world.is_server()` / `world.is_client()` let scripts gate logic.
+- ✅ Transport: the `dumb_net` crate has UDP with reliable-ordered and unreliable channels,
+  sequence numbers, connect / disconnect / reconnect, and a debug network emulator (latency,
+  jitter, loss, reordering). The runtime surfaces them to scripts as the typed events
+  `NetConnected` (with `reconnected`), `NetDisconnected` and `NetConnectFailed`; clients resume
+  a timed-out session automatically.
+- ✅ Replication: a `Replicated` component marks entities (`only` limits which components go
+  out). Each tick `ServerNet` captures their reflected components (the same `Value` path as
+  scenes) and sends each connection a delta against what it was last sent, with server→client
+  entity id mapping (including entity references inside component values). `ClientNet`
+  applies them through a jitter buffer; for the entity a client owns, `Transform` is left to
+  client-side prediction and a `NetReconcile` event (server state + last applied command
+  sequence) feeds `dumb_net::Predictor::reconcile`. Deltas ride the reliable-ordered channel.
+- ✅ Interest management: `ServerNet` keeps a `SpatialGrid` of replicated entities
+  (`ServerNet::grid`, for host-side gameplay queries; scripts reach the same data through
+  `StreamFocus` and the per-connection area of interest), a per-connection area of interest
+  (spawn/despawn on enter/leave, with hysteresis) and a per-connection bandwidth budget per
+  tick, nearest entities first. The viewers also feed `StreamFocus`, so streaming and AI LOD
+  follow the players.
+- ✅ Client input and RPCs: scripts send `NetSend { message: NetMessage { name, entity,
+  payload } }` (payload: any reflected value, `NetMessage::new` / `decode`), on a client as a
+  command to the server, on the server to one connection or all. The server runs every command
+  through the `CommandGate` (ownership of the target entity, per-tick rate limit, ordering,
+  finite-float payload check, an optional game validator) before scripts see it as a
+  `ClientCommand`; refused ones become `CommandRejected`. Clients get `ServerMessage`.
+- ✅ Session security and persistence: handshake with a keyed cookie challenge against UDP
+  spoofing/amplification, pluggable token authentication, per-connection packet rate limits
+  (all in `dumb_net`), and `dumb-server --listen ADDR --save FILE` writes the replicated world
+  atomically every `--save-every` ticks and on shutdown, and restores it (ownership cleared) at
+  startup. `dumb-player --connect ADDR` joins a server.
+
 
 ## 4. Animation
 - State machines and blend trees as assets, plus animation events dispatched to scripts.

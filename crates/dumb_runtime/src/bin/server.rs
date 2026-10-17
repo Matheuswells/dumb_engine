@@ -1,4 +1,5 @@
-//! Headless game server: `dumb-server [project_dir] [scene] [--hz N] [--ticks N]`.
+//! Headless game server: `dumb-server [project_dir] [scene] [--hz N] [--ticks N] [--listen ADDR]
+//! [--save FILE] [--save-every TICKS]`.
 //!
 //! Runs a project's simulation (scripts, physics, AI, world streaming) with no window or GPU.
 //! Assets load as data only: models for colliders and animation, scenes for streaming.
@@ -7,6 +8,10 @@
 //!
 //! Streaming and AI LOD follow the `StreamFocus` resource (one point per player, set by the
 //! game), or a camera in the scene when there is none. Ctrl+C or SIGTERM stops it cleanly.
+//!
+//! With `--listen` (e.g. `0.0.0.0:7777`) the server accepts clients and replicates every entity
+//! with a `Replicated` component (see `dumb_runtime::net`). `--save` writes the replicated world
+//! periodically and on shutdown, and restores it at startup, so the world survives restarts.
 
 use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Time};
@@ -25,10 +30,15 @@ struct Args {
     hz: u32,
     /// Stop after this many ticks (0 = run until stopped). For smoke tests and benchmarks.
     ticks: u64,
+    /// UDP address to accept clients on (none = no networking).
+    listen: Option<String>,
+    save: Option<std::path::PathBuf>,
+    /// World save interval in ticks.
+    save_every: u64,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { project: "project".into(), scene: None, hz: 30, ticks: 0 };
+    let mut args = Args { project: "project".into(), scene: None, hz: 30, ticks: 0, listen: None, save: None, save_every: 1800 };
     // An exported game has project.ron next to the executable.
     if let Some(d) = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())).filter(|d| d.join("project.ron").exists()) {
         args.project = d;
@@ -42,6 +52,9 @@ fn parse_args() -> Result<Args, String> {
             // time slower than real time.
             "--hz" => args.hz = number("--hz")?.clamp(4, 1000) as u32,
             "--ticks" => args.ticks = number("--ticks")?,
+            "--save-every" => args.save_every = number("--save-every")?,
+            "--listen" => args.listen = Some(it.next().ok_or("--listen needs an address")?),
+            "--save" => args.save = Some(it.next().ok_or("--save needs a file")?.into()),
             "-h" | "--help" => return Err(String::new()),
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             _ => {
@@ -65,7 +78,7 @@ fn main() {
             if !e.is_empty() {
                 eprintln!("error: {e}");
             }
-            eprintln!("usage: dumb-server [project_dir] [scene] [--hz N] [--ticks N]");
+            eprintln!("usage: dumb-server [project_dir] [scene] [--hz N] [--ticks N] [--listen ADDR] [--save FILE] [--save-every TICKS]");
             std::process::exit(if e.is_empty() { 0 } else { 2 });
         }
     };
@@ -110,6 +123,20 @@ fn main() {
     let tick_dt = 1.0 / args.hz as f32;
     log::info!("serving `{}` ({scene}) at {} Hz, {} entities", project.settings.name, args.hz, world.entity_count());
 
+    // Networking: the server sees `Replicated` entities and raises connection events.
+    let mut net = args.listen.as_deref().map(|addr| {
+        let socket = dumb_net::bind_udp(addr).unwrap_or_else(|e| {
+            log::error!("cannot listen on {addr}: {e}");
+            std::process::exit(1);
+        });
+        let cfg = dumb_runtime::net::ServerConfig { hz: args.hz, save_path: args.save.clone(), save_every: args.save_every, ..Default::default() };
+        let mut n = dumb_runtime::net::ServerNet::new(socket, cfg, &mut world);
+        n.restore(&mut world);
+        log::info!("listening on {addr}");
+        n
+    });
+    let started = Instant::now();
+
     let mut report = Report::default();
     let mut tick: u64 = 0;
     while !stop.load(Ordering::SeqCst) && (args.ticks == 0 || tick < args.ticks) {
@@ -118,7 +145,13 @@ fn main() {
         scripts.update(&mut [&mut world]);
         request_sim_assets(&world, &mut db);
         time.advance(tick_dt);
+        if let Some(n) = net.as_mut() {
+            n.pre_tick(&mut world, started.elapsed().as_secs_f64());
+        }
         let sim = simulate(&mut world, &mut scripts, &db, &time, &input, Some(&mut physics), Some(&mut streamer), &project.settings, &mut hud, &mut meshes);
+        if let Some(n) = net.as_mut() {
+            n.post_tick(&mut world);
+        }
         db.apply_mesh_uploads(&mut meshes);
         // No web panels to run scripts' JavaScript in: drop it so it doesn't pile up.
         hud.web_eval.clear();
@@ -131,6 +164,9 @@ fn main() {
     }
 
     log::info!("stopping after {tick} ticks");
+    if let Some(n) = &net {
+        n.save_now(&world);
+    }
     scripts.unload(&mut [&mut world]);
 }
 

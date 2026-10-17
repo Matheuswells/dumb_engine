@@ -14,6 +14,15 @@
   loaded around every player. `Streamer::update` and `ai::orchestrate` take a slice of points.
 - `find_primary_camera` moved to `dumb_ecs` (`dumb_render` re-exports it).
 
+- **Multiplayer runtime**: `dumb-server --listen ADDR [--save FILE] [--save-every TICKS]` accepts
+  clients over UDP (`dumb_net`) and replicates every entity with a `Replicated` component as
+  delta snapshots limited to each client's area of interest and bandwidth budget;
+  `dumb-player --connect ADDR` joins. Scripts get `world.is_server()` / `is_client()`, the events
+  `NetConnected`, `NetDisconnected`, `ClientCommand`, `CommandRejected`, `ServerMessage`,
+  `NetReconcile`, and send typed messages with `NetSend`. Commands from clients are validated
+  (ownership, rate, order, payload). The world save/restore keeps a persistent world across
+  restarts.
+
 ### Simulation
 - **Fixed-timestep loop.** New project settings `sim_hz` / `sim_max_steps` run the simulation
   (scripts, AI, streaming, animation) at a fixed tick rate independent of the frame rate;
