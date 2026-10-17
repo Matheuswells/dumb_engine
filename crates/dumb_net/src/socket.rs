@@ -16,12 +16,16 @@ impl Datagram for std::net::UdpSocket {
     }
     fn recv_from(&mut self) -> Option<(SocketAddr, Vec<u8>)> {
         let mut buf = [0u8; 2048];
-        match std::net::UdpSocket::recv_from(self, &mut buf) {
-            Ok((n, from)) => Some((from, buf[..n].to_vec())),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => None,
-            // ICMP "connection reset" surfaces as an error on some platforms; ignore it.
-            Err(_) => None,
+        // ICMP "connection reset" surfaces as an error on some platforms: skip it and keep
+        // draining (bounded, so a persistent error cannot spin).
+        for _ in 0..16 {
+            match std::net::UdpSocket::recv_from(self, &mut buf) {
+                Ok((n, from)) => return Some((from, buf[..n].to_vec())),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return None,
+                Err(_) => continue,
+            }
         }
+        None
     }
 }
 

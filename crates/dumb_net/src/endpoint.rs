@@ -22,7 +22,8 @@ pub enum NetEvent {
     Connected(ConnectionId),
     /// A known session came back (new socket address) within the grace period.
     Reconnected(ConnectionId),
-    /// Peer left or timed out. `timed_out` is false for an explicit disconnect.
+    /// Peer left or timed out. `timed_out` is false for an explicit disconnect, and for a
+    /// timed-out session whose reconnect grace period ran out (the final event for that id).
     Disconnected { id: ConnectionId, timed_out: bool },
     Message { id: ConnectionId, channel: Channel, data: Vec<u8> },
     /// Client only: the connection attempt timed out.
@@ -203,7 +204,7 @@ pub struct Server<S: Datagram> {
 
 impl<S: Datagram> Server<S> {
     pub fn new(socket: S, cfg: NetConfig) -> Self {
-        // Not a secret: handshake authentication and cookies are a separate layer.
+        // Only a counter start: ids are hashed with the random keys below.
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -302,7 +303,11 @@ impl<S: Datagram> Server<S> {
         }
         for (session, _) in dead {
             if let Some(c) = self.conns.remove(&session) {
-                self.by_addr.remove(&c.addr);
+                if self.by_addr.get(&c.addr) == Some(&session) {
+                    self.by_addr.remove(&c.addr);
+                }
+                // The grace period is over: tell the host so it can drop its per-session state.
+                self.events.push(NetEvent::Disconnected { id: ConnectionId(session), timed_out: false });
             }
         }
         std::mem::take(&mut self.events)
@@ -341,14 +346,23 @@ impl<S: Datagram> Server<S> {
             c.addr = from;
             c.link.last_recv = now;
             c.lingering = None;
-            self.by_addr.remove(&old);
+            if self.by_addr.get(&old) == Some(&s) {
+                self.by_addr.remove(&old);
+            }
             self.by_addr.insert(from, s);
             self.accept(from, s);
             self.events.push(NetEvent::Reconnected(ConnectionId(s)));
             return;
         }
-        let s = self.next_session;
-        self.next_session = self.next_session.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) | 1;
+        // Session ids authorize resuming, so they come from the keyed hash, not a guessable sequence.
+        let s = loop {
+            use std::hash::BuildHasher;
+            self.next_session = self.next_session.wrapping_add(1);
+            let s = self.cookie_keys.1.hash_one((self.next_session, 0x5e55_u16)) | 1;
+            if !self.conns.contains_key(&s) {
+                break s;
+            }
+        };
         self.conns.insert(
             s,
             Conn { addr: from, link: Link::new(now), lingering: None, bucket: self.cfg.max_packets_per_sec, bucket_time: now },

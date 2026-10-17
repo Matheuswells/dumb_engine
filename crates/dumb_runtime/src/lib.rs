@@ -403,6 +403,7 @@ pub fn simulate_frame(
     settings: &ProjectSettings,
     hud: &mut dumb_ecs::Hud,
     meshes: &mut dumb_ecs::MeshUploads,
+    mut after_tick: Option<&mut dyn FnMut(&mut World)>,
 ) -> SimStats {
     // Rebuild the clock when the settings changed (the editor edits them live).
     let want = clock_for(settings);
@@ -421,6 +422,9 @@ pub fn simulate_frame(
         time.advance(raw_dt);
         let mut stats = simulate(world, scripts, db, time, input, physics, streamer, settings, hud, meshes);
         stats.ticks = 1;
+        if let Some(f) = after_tick.as_deref_mut() {
+            f(world);
+        }
         return stats;
     };
     let mut stats = SimStats::default();
@@ -431,6 +435,9 @@ pub fn simulate_frame(
         }
         *time = c.next_tick(time.time_scale);
         stats = simulate(world, scripts, db, time, input, physics.as_deref_mut(), streamer.as_deref_mut(), settings, hud, meshes);
+        if let Some(f) = after_tick.as_deref_mut() {
+            f(world);
+        }
     }
     stats.ticks = n;
     stats

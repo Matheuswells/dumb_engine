@@ -18,7 +18,7 @@ use dumb_ecs::net::{
 };
 use dumb_ecs::{SceneData, StreamFocus, Transform, World};
 use dumb_net::{
-    apply_delta, decode_delta, diff, encode_delta, encode_str, encode_value, load_snapshot, save_snapshot, ByteReader, Channel, Client,
+    apply_delta, decode_delta, diff, encode_delta, encode_str, encode_value, load_snapshot, split_delta, save_snapshot, ByteReader, Channel, Client,
     ClientState, CommandGate, ConnectionId, Datagram, EntityMap, Interest, JitterBuffer, NetConfig, NetEvent, NetId, Op, Reject, Server,
     Snapshot, SpatialGrid,
 };
@@ -142,6 +142,10 @@ struct Conn {
     viewer: Vec3,
     /// Timed out and waiting for a reconnect: nothing is sent and it doesn't count as a viewer.
     lingering: bool,
+    /// Highest command sequence whose effect is already in the state (scripts handle a command
+    /// one tick after it is accepted), and the one last sent.
+    ack_ready: u32,
+    ack_sent: u32,
 }
 
 /// The authoritative side.
@@ -252,7 +256,7 @@ impl<S: Datagram> ServerNet<S> {
             match ev {
                 NetEvent::Connected(id) | NetEvent::Reconnected(id) => {
                     let reconnected = matches!(ev, NetEvent::Reconnected(_));
-                    let c = self.conns.entry(id).or_insert_with(|| Conn { interest: Interest::new(), sent: Snapshot::new(), last_tick: 0, viewer: Vec3::ZERO, lingering: false });
+                    let c = self.conns.entry(id).or_insert_with(|| Conn { interest: Interest::new(), sent: Snapshot::new(), last_tick: 0, viewer: Vec3::ZERO, lingering: false, ack_ready: 0, ack_sent: 0 });
                     c.lingering = false;
                     world.send_event(NetConnected { connection: id.0, reconnected });
                 }
@@ -357,7 +361,9 @@ impl<S: Datagram> ServerNet<S> {
         let ids: Vec<ConnectionId> = self.conns.iter().filter(|(_, c)| !c.lingering).map(|(id, _)| *id).collect();
         for id in ids {
             let c = self.conns.get_mut(&id).unwrap();
-            let cost = |k: NetId| 24 + current.get(&k).map_or(0, |m| m.len() * 40);
+            // Only entities that changed cost bandwidth, so static ones don't use up the budget.
+            let sent = &c.sent;
+            let cost = |k: NetId| if sent.get(&k) == current.get(&k) { 0 } else { 24 + current.get(&k).map_or(0, |m| m.len() * 40) };
             let upd = c.interest.update(&self.grid, c.viewer, self.cfg.interest_radius, self.cfg.hysteresis, self.cfg.bandwidth_per_tick, cost);
             let fresh: HashSet<NetId> = upd.spawn.iter().chain(&upd.update).copied().collect();
             let mut target = Snapshot::new();
@@ -369,15 +375,24 @@ impl<S: Datagram> ServerNet<S> {
             let delta = diff(&c.sent, &target, c.last_tick, self.tick);
             c.sent = target;
             c.last_tick = self.tick;
-            let acked = self.gate.last_seq(id);
-            if delta.ops.is_empty() && self.tick % self.cfg.hz.max(1) != 0 {
+            // Commands accepted this tick reach scripts next tick: ack what the state includes.
+            let acked = c.ack_ready;
+            c.ack_ready = self.gate.last_seq(id);
+            if delta.ops.is_empty() && acked == c.ack_sent && self.tick % self.cfg.hz.max(1) != 0 {
                 continue; // nothing to say; a heartbeat delta goes out once a second
             }
-            let mut b = vec![MSG_DELTA];
-            b.extend_from_slice(&(self.cfg.hz as u16).to_le_bytes());
-            b.extend_from_slice(&acked.to_le_bytes());
-            b.extend_from_slice(&encode_delta(&delta));
-            self.server.send(id, Channel::ReliableOrdered, &b);
+            c.ack_sent = acked;
+            // A delta over the datagram budget goes out as several messages (reliable and
+            // ordered, so the baseline advanced above stays correct).
+            for part in split_delta(delta, dumb_net::MAX_MESSAGE - 7) {
+                let mut b = vec![MSG_DELTA];
+                b.extend_from_slice(&(self.cfg.hz as u16).to_le_bytes());
+                b.extend_from_slice(&acked.to_le_bytes());
+                b.extend_from_slice(&encode_delta(&part));
+                if !self.server.send(id, Channel::ReliableOrdered, &b) {
+                    log::warn!("replication message of {} bytes to connection {} not sent", b.len(), id.0);
+                }
+            }
         }
 
         // Messages scripts asked to send.
@@ -387,7 +402,9 @@ impl<S: Datagram> ServerNet<S> {
             let ch = if m.reliable { Channel::ReliableOrdered } else { Channel::Unreliable };
             let targets: Vec<ConnectionId> = if m.to == 0 { self.conns.iter().filter(|(_, c)| !c.lingering).map(|(id, _)| *id).collect() } else { vec![ConnectionId(m.to)] };
             for t in targets {
-                self.server.send(t, ch, &b);
+                if !self.server.send(t, ch, &b) && self.conns.contains_key(&t) {
+                    log::debug!("message `{}` to connection {} not sent ({} bytes)", m.message.name, t.0, b.len());
+                }
             }
         }
 
@@ -435,6 +452,11 @@ pub struct ClientNet<S: Datagram> {
     /// reacts to `NetReconcile`).
     pub predict_owned: bool,
     acked_seq: u32,
+    /// Server time of the newest snapshot pushed to the jitter buffer.
+    last_push: Option<f64>,
+    /// While set (a time), a failed attempt to resume a timed-out session is retried until then.
+    resume_until: f64,
+    grace: f64,
 }
 
 impl<S: Datagram> ClientNet<S> {
@@ -456,6 +478,9 @@ impl<S: Datagram> ClientNet<S> {
             next_seq: 1,
             predict_owned: true,
             acked_seq: 0,
+            last_push: None,
+            resume_until: f64::NEG_INFINITY,
+            grace: cfg.reconnect_grace,
         }
     }
 
@@ -481,9 +506,10 @@ impl<S: Datagram> ClientNet<S> {
         self.map.local(server).map(Entity::from_bits)
     }
 
-    /// Once per frame: receive, apply the interpolated state, send queued commands.
-    pub fn update(&mut self, world: &mut World, now: f64) {
-        // Queue this tick's commands first so the update below puts them on the wire.
+    /// Once per simulation tick (after the scripts ran): queues the `NetSend` commands they
+    /// raised; `update` puts them on the wire. Events last one tick, so with several ticks per
+    /// frame this has to run for each of them.
+    pub fn queue_commands(&mut self, world: &mut World) {
         let me = world.resource::<NetSession>().map_or(0, |s| s.connection);
         let out: Vec<NetSend> = world.events::<NetSend>().cloned().collect();
         for m in out {
@@ -502,29 +528,59 @@ impl<S: Datagram> ClientNet<S> {
             let b = encode_message(MSG_COMMAND, &seq.to_le_bytes(), &msg);
             let ch = if m.reliable { Channel::ReliableOrdered } else { Channel::Unreliable };
             if !self.client.send(ch, &b) {
-                log::debug!("command `{}` dropped: not connected (connection {me})", msg.name);
+                log::debug!("command `{}` dropped: not connected or too big (connection {me})", msg.name);
             }
         }
+    }
+
+    /// Once per frame: receive, apply the interpolated state, flush queued commands.
+    pub fn update(&mut self, world: &mut World, now: f64) {
         for ev in self.client.update(now) {
             match ev {
                 NetEvent::Connected(id) | NetEvent::Reconnected(id) => {
+                    let resumed = matches!(ev, NetEvent::Reconnected(_));
+                    if !resumed {
+                        // A new session starts from nothing on the server: forget the old world.
+                        self.reset(world);
+                    }
+                    self.resume_until = f64::NEG_INFINITY;
                     if let Some(s) = world.resource_mut::<NetSession>() {
                         s.connection = id.0;
                     }
-                    world.send_event(NetConnected { connection: id.0, reconnected: matches!(ev, NetEvent::Reconnected(_)) });
+                    world.send_event(NetConnected { connection: id.0, reconnected: resumed });
                 }
                 NetEvent::Disconnected { timed_out, .. } => {
                     world.send_event(NetDisconnected { connection: 0, timed_out });
                     // Try to resume the same session; the server falls back to a fresh one.
                     if timed_out {
+                        self.resume_until = now + self.grace;
                         self.client.reconnect(now);
                     }
                 }
+                NetEvent::ConnectFailed if now < self.resume_until => self.client.reconnect(now),
                 NetEvent::ConnectFailed => world.send_event(NetConnectFailed),
                 NetEvent::Message { data, .. } => self.on_message(world, now, &data),
             }
         }
         self.apply_interpolated(world, now);
+    }
+
+    /// Forgets everything received (a fresh session): despawns the replicated entities.
+    fn reset(&mut self, world: &mut World) {
+        for sid in self.latest.keys().chain(self.applied.keys()) {
+            if let Some(l) = self.map.forget(*sid) {
+                let e = Entity::from_bits(l);
+                if world.is_alive(e) {
+                    world.despawn(e);
+                }
+            }
+        }
+        self.latest.clear();
+        self.applied.clear();
+        self.jitter = JitterBuffer::new(self.jitter.delay);
+        self.offset = None;
+        self.last_push = None;
+        self.acked_seq = 0;
     }
 
     fn server_id(&self, local: u64) -> Option<NetId> {
@@ -539,8 +595,15 @@ impl<S: Datagram> ClientNet<S> {
                 let Some(delta) = decode_delta(r.rest()) else { return };
                 self.hz = hz.max(1) as f64;
                 self.acked_seq = acked;
-                apply_delta(&mut self.latest, &delta);
                 let server_time = delta.tick as f64 / self.hz;
+                // After a quiet spell the server sent nothing: the entities held still until now,
+                // so give the interpolation a keyframe just before this change.
+                let before = self.last_push.filter(|t| server_time - t > 1.5 / self.hz).map(|_| self.latest.clone());
+                apply_delta(&mut self.latest, &delta);
+                if let Some(prev) = before {
+                    self.jitter.push(server_time - 1.0 / self.hz, prev);
+                }
+                self.last_push = Some(server_time);
                 let cand = server_time - now;
                 self.offset = Some(match self.offset {
                     None => cand,
@@ -666,6 +729,7 @@ mod tests {
             self.sw.update_transforms();
             self.sw.update_events();
             self.server.post_tick(&mut self.sw);
+            self.client.queue_commands(&mut self.cw);
             self.client.update(&mut self.cw, self.t);
             self.cw.update_events();
         }
@@ -706,6 +770,32 @@ mod tests {
     }
 
     #[test]
+    fn many_entities_arrive_split_over_several_messages_and_static_ones_do_not_starve_movers() {
+        let mut r = Rig::new(ServerConfig::default());
+        let es: Vec<Entity> = (0..60).map(|i| r.replicated_at(i as f32 * 0.5, 0)).collect();
+        r.run(2.0);
+        for (i, e) in es.iter().enumerate() {
+            assert_eq!(client_x(&r, *e), Some(i as f32 * 0.5), "entity {i} missing");
+        }
+        // The farthest entity moves while the nearer ones stay still.
+        r.sw.get_mut::<Transform>(es[59]).unwrap().translation.x = 100.0;
+        r.run(1.0);
+        assert_eq!(client_x(&r, es[59]), Some(100.0));
+    }
+
+    #[test]
+    fn fresh_session_drops_entities_despawned_while_away() {
+        let mut r = Rig::new(ServerConfig::default());
+        let e = r.replicated_at(2.0, 0);
+        r.run(1.0);
+        let local = r.client.local_entity(e.to_bits()).unwrap();
+        assert!(r.cw.is_alive(local));
+        r.client.reset(&mut r.cw);
+        assert!(!r.cw.is_alive(local));
+        assert!(r.client.local_entity(e.to_bits()).is_none());
+    }
+
+    #[test]
     fn only_nearby_entities_are_replicated() {
         let mut r = Rig::new(ServerConfig { interest_radius: 50.0, ..Default::default() });
         let near = r.replicated_at(5.0, 0);
@@ -732,6 +822,7 @@ mod tests {
             r.cw.send_event(NetSend { to: 0, message: NetMessage { name: "move".into(), entity: l.to_bits(), payload: Value::Vec(vec![v, 0.0, 0.0]) }, reliable: false, seq });
             r.cw.update_events();
             r.t += 0.001;
+            r.client.queue_commands(&mut r.cw);
             r.client.update(&mut r.cw, r.t);
         };
         sent(&mut r, mine, 1, 1.0);

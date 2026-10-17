@@ -561,7 +561,7 @@ impl Editor {
                 _ => dt,
             };
             let Editor { docs, active, scripts, db, time, sim_clock, input, physics, streamer, project, stats, hud, meshes, .. } = self;
-            let sim = dumb_runtime::simulate_frame(sim_clock, time, dt, &mut docs[*active].world, scripts, db, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud, meshes);
+            let sim = dumb_runtime::simulate_frame(sim_clock, time, dt, &mut docs[*active].world, scripts, db, input, physics.as_mut(), streamer.as_mut(), &project.settings, hud, meshes, None);
             db.apply_mesh_uploads(meshes);
             stats.ai = sim.ai;
             stats.stream = sim.stream;

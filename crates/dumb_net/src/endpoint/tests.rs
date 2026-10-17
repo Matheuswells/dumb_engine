@@ -213,3 +213,24 @@ fn per_connection_rate_limit_drops_floods() {
     assert!(got <= 11, "{got} messages passed the limiter");
     assert!(got > 0);
 }
+
+#[test]
+fn expired_session_is_reported_and_ids_are_not_sequential() {
+    let net_cfg = NetConfig { timeout: 1.0, reconnect_grace: 3.0, ..Default::default() };
+    let mut r = Rig::new(EmulatorConfig::default(), net_cfg);
+    r.client.connect(0.0);
+    r.run(0.5);
+    let id = r.client.id().unwrap();
+    for _ in 0..600 {
+        r.now += 0.01;
+        r.sev.extend(r.server.update(r.now));
+    }
+    assert!(r.sev.contains(&NetEvent::Disconnected { id, timed_out: true }));
+    assert!(r.sev.contains(&NetEvent::Disconnected { id, timed_out: false }), "grace expiry must be reported");
+    assert_eq!(r.server.connection_count(), 0);
+    // A new session's id is not a simple function of the previous one.
+    let mut r2 = Rig::new(EmulatorConfig::default(), net_cfg);
+    r2.client.connect(0.0);
+    r2.run(0.5);
+    assert_ne!(r2.client.id().unwrap(), id);
+}

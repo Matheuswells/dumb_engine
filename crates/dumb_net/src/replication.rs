@@ -163,8 +163,13 @@ impl EntityMap {
 // ---- wire encoding -----------------------------------------------------------------------
 
 fn put_str(b: &mut Vec<u8>, s: &str) {
-    b.extend_from_slice(&(s.len() as u16).to_le_bytes());
-    b.extend_from_slice(s.as_bytes());
+    // The length is a u16: cut longer strings at a character boundary.
+    let mut n = s.len().min(u16::MAX as usize);
+    while !s.is_char_boundary(n) {
+        n -= 1;
+    }
+    b.extend_from_slice(&(n as u16).to_le_bytes());
+    b.extend_from_slice(&s.as_bytes()[..n]);
 }
 
 fn put_value(b: &mut Vec<u8>, v: &Value) {
@@ -330,6 +335,30 @@ impl<'a> ByteReader<'a> {
     }
 }
 
+/// Splits `d` into deltas whose encoding fits `max` bytes each (an op bigger than `max` goes
+/// alone). They carry the same ticks and apply in order.
+pub fn split_delta(d: Delta, max: usize) -> Vec<Delta> {
+    let (tick, baseline) = (d.tick, d.baseline);
+    let empty = || Delta { tick, baseline, ops: vec![] };
+    let header = encode_delta(&empty()).len();
+    let mut out = Vec::new();
+    let mut cur = empty();
+    let mut size = header;
+    for op in d.ops {
+        let n = encode_delta(&Delta { tick, baseline, ops: vec![op.clone()] }).len() - header;
+        if !cur.ops.is_empty() && size + n > max {
+            out.push(std::mem::replace(&mut cur, empty()));
+            size = header;
+        }
+        size += n;
+        cur.ops.push(op);
+    }
+    if !cur.ops.is_empty() || out.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
 pub fn encode_delta(d: &Delta) -> Vec<u8> {
     let mut b = Vec::new();
     b.extend_from_slice(&d.tick.to_le_bytes());
@@ -428,8 +457,14 @@ impl JitterBuffer {
 
     /// Records a snapshot stamped with server time `time` (out-of-order stamps are dropped).
     pub fn push(&mut self, time: f64, snap: Snapshot) {
-        if self.buf.back().is_some_and(|(t, _)| *t >= time) {
-            return;
+        match self.buf.back_mut() {
+            Some((t, _)) if *t > time => return,
+            // Same server time (a delta split over several messages): keep the newest state.
+            Some((t, s)) if *t == time => {
+                *s = snap;
+                return;
+            }
+            _ => {}
         }
         self.buf.push_back((time, snap));
         while self.buf.len() > 64 {
@@ -476,6 +511,28 @@ mod tests {
         s.entry(5).or_default().insert("Target".into(), Value::Struct(vec![("who".into(), Value::Entity(target))]));
         s.entry(9).or_default().insert("Body".into(), pos(1.0));
         s
+    }
+
+    #[test]
+    fn split_delta_fits_the_budget_and_keeps_every_op() {
+        let ops: Vec<Op> = (0..50).map(|i| Op::Set { entity: i, comp: "Body".into(), value: Value::String("x".repeat(40)) }).collect();
+        let d = Delta { tick: 7, baseline: 3, ops };
+        let parts = split_delta(d.clone(), 300);
+        assert!(parts.len() > 1);
+        assert!(parts.iter().all(|p| encode_delta(p).len() <= 300 && p.tick == 7 && p.baseline == 3));
+        assert_eq!(parts.into_iter().flat_map(|p| p.ops).collect::<Vec<_>>(), d.ops);
+        assert_eq!(split_delta(Delta::default(), 300).len(), 1);
+    }
+
+    #[test]
+    fn long_strings_are_cut_not_corrupted() {
+        let d = Delta { tick: 1, baseline: 0, ops: vec![
+            Op::Set { entity: 1, comp: "A".into(), value: Value::String("é".repeat(40000)) },
+            Op::Despawn { entity: 2 },
+        ] };
+        let back = decode_delta(&encode_delta(&d)).unwrap();
+        assert_eq!(back.ops.len(), 2);
+        assert_eq!(back.ops[1], Op::Despawn { entity: 2 });
     }
 
     #[test]

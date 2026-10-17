@@ -14,6 +14,12 @@
   loaded around every player. `Streamer::update` and `ai::orchestrate` take a slice of points.
 - `find_primary_camera` moved to `dumb_ecs` (`dumb_render` re-exports it).
 
+- Multiplayer robustness: deltas over one datagram are split into several reliable messages,
+  unchanged entities no longer use up the bandwidth budget, command acks wait until scripts have
+  applied the command, client commands are queued once per tick (`simulate_frame` takes an
+  `after_tick` hook, `ClientNet::queue_commands`), session ids are unguessable, sessions that
+  outlive the reconnect grace report a final `NetDisconnected { timed_out: false }`, and a client
+  given a fresh session clears the world it had received.
 - **Multiplayer runtime**: `dumb-server --listen ADDR [--save FILE] [--save-every TICKS]` accepts
   clients over UDP (`dumb_net`) and replicates every entity with a `Replicated` component as
   delta snapshots limited to each client's area of interest and bandwidth budget;

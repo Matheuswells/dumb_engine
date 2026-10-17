@@ -155,7 +155,14 @@ impl ApplicationHandler for App {
                 g.last = Instant::now();
                 g.db.update();
                 g.scripts.update(&mut [&mut g.world]);
-                g.sim = simulate_frame(&mut g.clock, &mut g.time, dt, &mut g.world, &mut g.scripts, &g.db, &mut g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes);
+                // Commands the scripts raise last one tick: queue them after each tick, not each frame.
+                let mut net = g.net.as_mut();
+                let mut after_tick = |w: &mut dumb_ecs::World| {
+                    if let Some(n) = net.as_mut() {
+                        n.queue_commands(w);
+                    }
+                };
+                g.sim = simulate_frame(&mut g.clock, &mut g.time, dt, &mut g.world, &mut g.scripts, &g.db, &mut g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes, Some(&mut after_tick));
                 if let Some(n) = g.net.as_mut() {
                     n.update(&mut g.world, g.started.elapsed().as_secs_f64());
                 }

@@ -18,5 +18,7 @@ pub use emulator::{Emulated, EmulatorConfig};
 pub use gameplay::{CommandGate, Predictor, Reject};
 pub use interest::{Interest, InterestUpdate, SpatialGrid};
 pub use endpoint::{Channel, Client, ClientState, ConnectionId, NetConfig, NetEvent, Server};
-pub use replication::{encode_str, encode_value, ByteReader, load_snapshot, save_snapshot, decode_delta, encode_delta, apply_delta, diff, Delta, EntityMap, JitterBuffer, NetId, Op, Snapshot};
+pub use replication::{encode_str, encode_value, ByteReader, load_snapshot, save_snapshot, decode_delta, encode_delta, split_delta, apply_delta, diff, Delta, EntityMap, JitterBuffer, NetId, Op, Snapshot};
+/// Largest message `send` accepts, in bytes (there is no fragmentation).
+pub const MAX_MESSAGE: usize = wire::MAX_BODY - 7;
 pub use socket::{bind_udp, Datagram, MemNet, MemSocket};
