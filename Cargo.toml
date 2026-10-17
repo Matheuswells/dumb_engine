@@ -11,6 +11,7 @@ members = [
     "crates/dumb_runtime",
     "crates/dumb_editor",
     "crates/dumb_physics",
+    "crates/dumb_net",
 ]
 # Each project owns a standalone scripts crate (its own workspace).
 exclude = ["project/Scripts"]
@@ -30,6 +31,7 @@ dumb_render = { path = "crates/dumb_render" }
 dumb_script = { path = "crates/dumb_script" }
 dumb_runtime = { path = "crates/dumb_runtime" }
 dumb_physics = { path = "crates/dumb_physics" }
+dumb_net = { path = "crates/dumb_net" }
 
 glam = { version = "0.30", features = ["serde", "bytemuck"] }
 serde = { version = "1", features = ["derive"] }

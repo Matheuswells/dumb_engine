@@ -62,6 +62,9 @@ server owns the simulation, clients render and send input.
 - Transport: UDP with reliable-ordered and unreliable channels, sequence numbers, connect /
   disconnect / reconnect surfaced to scripts as typed events, and a debug network emulator
   (latency, jitter, loss, reordering) for testing.
+  *Done so far:* the `dumb_net` crate (UDP/in-memory sockets, reliable-ordered + unreliable
+  channels, session reconnect, `NetEvent`s, `Emulated` socket). Still to do: wiring the events
+  into the runtime/scripts.
 - Replication: a `Replicated` component marks entities. Each tick the server diffs their
   reflected components (the same `Value` path as scenes) and sends delta snapshots with
   server→client entity id mapping (including entity references inside component values).

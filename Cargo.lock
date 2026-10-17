@@ -1173,6 +1173,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dumb_net"
+version = "0.3.3"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "dumb_physics"
 version = "0.3.3"
 dependencies = [
