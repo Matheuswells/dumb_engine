@@ -380,8 +380,17 @@ fn project_tab(ui: &mut egui::Ui, project: &mut Project, scenes: &[String]) -> b
             }
         });
         ui.end_row();
-        ui.label("Simulation rate");
+        ui.label("Physics rate");
         c |= ui.add(egui::Slider::new(&mut p.physics_hz, 20..=480).suffix(" Hz")).changed();
+        ui.end_row();
+        ui.label("Game tick rate").on_hover_text("Scripts and AI run this many times per second, independent of the frame rate. 0 = once per frame.");
+        c |= ui.add(egui::Slider::new(&mut p.sim_hz, 0..=240).suffix(" Hz")).changed();
+        ui.end_row();
+        ui.label("Max ticks per frame");
+        c |= ui.add(egui::Slider::new(&mut p.sim_max_steps, 1..=16)).changed();
+        ui.end_row();
+        ui.label("Deterministic").on_hover_text("Fixed tick length (60 Hz if the tick rate is 0), time derived from the tick counter, time scale ignored: for replays and networking.");
+        c |= ui.checkbox(&mut p.deterministic, "").changed();
         ui.end_row();
         ui.label("Max steps per frame");
         c |= ui.add(egui::Slider::new(&mut p.physics_max_steps, 1..=16)).changed();

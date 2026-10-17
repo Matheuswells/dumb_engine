@@ -8,7 +8,7 @@ use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Time};
 use dumb_ecs::World;
 use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, world_skybox, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
-use dumb_runtime::{simulate, Project};
+use dumb_runtime::{simulate_frame, Project};
 use dumb_script::ScriptHost;
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,6 +27,7 @@ struct Game {
     world: World,
     scripts: ScriptHost,
     time: Time,
+    clock: Option<dumb_core::FixedClock>,
     input: Input,
     physics: dumb_physics::Physics,
     streamer: dumb_runtime::streaming::Streamer,
@@ -94,6 +95,7 @@ impl ApplicationHandler for App {
             world,
             scripts,
             time: Time::new(),
+            clock: None,
             input: Input::default(),
             physics: {
                 let mut p = dumb_physics::Physics::new(dumb_core::Vec3::from(self.project.settings.gravity));
@@ -140,10 +142,9 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let dt = g.last.elapsed().as_secs_f32();
                 g.last = Instant::now();
-                g.time.advance(dt);
                 g.db.update();
                 g.scripts.update(&mut [&mut g.world]);
-                g.sim = simulate(&mut g.world, &mut g.scripts, &g.db, &g.time, &g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes);
+                g.sim = simulate_frame(&mut g.clock, &mut g.time, dt, &mut g.world, &mut g.scripts, &g.db, &mut g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes);
                 g.db.apply_mesh_uploads(&mut g.meshes);
 
                 let size = g.window.inner_size();
@@ -201,7 +202,10 @@ impl ApplicationHandler for App {
                 let mut delta = out.textures_delta;
                 delta.clear();
                 drop(_render);
-                g.input.end_frame();
+                // A frame without a tick keeps its input edges for the next one.
+                if g.sim.ticks > 0 {
+                    g.input.end_frame();
+                }
                 {
                     dumb_core::profile_scope!("frame cap wait");
                     g.limiter.wait(g.max_fps);
