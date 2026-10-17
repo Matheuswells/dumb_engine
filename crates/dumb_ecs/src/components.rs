@@ -297,6 +297,7 @@ pub(crate) fn register_builtin(w: &mut World) {
     w.register_type::<crate::anim::IkConstraint>();
     w.register_type::<crate::anim::LookAtConstraint>();
     w.register_type::<crate::anim::SpringChain>();
+    w.register_type::<crate::anim::MorphWeights>();
     w.register_type::<crate::streaming::StreamingCell>();
     w.register_type::<crate::hud::UiText>();
     w.register_type::<crate::hud::UiBar>();

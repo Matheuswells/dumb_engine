@@ -20,7 +20,7 @@ pub mod streaming;
 mod world;
 
 pub use ai::{AiAgent, AiSettings, AiStats};
-pub use anim::{AnimEvent, AnimGraphPlayer, IkConstraint, LookAtConstraint, SpringChain};
+pub use anim::{AnimEvent, AnimGraphPlayer, IkConstraint, LookAtConstraint, MorphWeights, SpringChain};
 pub use commands::Commands;
 pub use hud::{Anchor, Hud, HudCmd, HudPos, UiBar, UiButton, UiImage, UiPanel, UiText, UiWeb, UiWorldLabel};
 pub use meshes::{MeshPart, MeshUploads, RuntimeMesh};

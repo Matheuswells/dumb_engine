@@ -51,12 +51,26 @@ pub fn extract_world(world: &World, db: &mut AssetDatabase, view: &mut RenderVie
         if !mr.visible || mr.model.is_none() {
             continue;
         }
-        let Some(model) = db.model(mr.model) else { continue };
+        let Some(base_model) = db.model(mr.model) else { continue };
+        // Blend shapes: draw a per-entity copy of the model with the weights applied.
+        let mut model_id = mr.model;
+        let mut model = base_model;
+        if let Some(mw) = world.get::<dumb_ecs::MorphWeights>(e) {
+            if model.meshes.iter().any(|m| m.primitives.iter().any(|p| !p.morphs.is_empty())) {
+                let derived = mr.model.sub("morph", e.index as usize);
+                if db.set_morphed_model(derived, mr.model, &mw.weights) {
+                    if let Some(m) = db.model_loaded(derived) {
+                        model_id = derived;
+                        model = m;
+                    }
+                }
+            }
+        }
         let selected = opts.selected.iter().any(|s| *s == e || world.is_ancestor(*s, e));
         let world_m = world.global_matrix(e);
         let pose = crate::animation::entity_pose(world, db, e, &model);
         let first = view.draws.len();
-        culled += push_model(view, &model, mr.model, mr.material, world_m, mr.tint, pose.as_deref(), selected, opts.frustum_cull.then_some(&frustum));
+        culled += push_model(view, &model, model_id, mr.material, world_m, mr.tint, pose.as_deref(), selected, opts.frustum_cull.then_some(&frustum));
         if !mr.cast_shadows {
             for d in &mut view.draws[first..] {
                 d.cast_shadows = false;

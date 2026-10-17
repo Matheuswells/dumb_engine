@@ -79,10 +79,12 @@ server owns the simulation, clients render and send input.
   world save/restore on the server so the shared world survives restarts.
 
 ## 4. Animation
-- State machines and blend trees as assets, plus animation events dispatched to scripts.
-- Procedural animation: IK (two-bone, FABRIK), look-at, foot placement, spring bones.
-- Root-motion extraction applied to `Transform`.
-- Morph targets.
+- ✅ State machines and blend trees as `.animgraph` assets (`AnimGraphPlayer`), plus animation
+  events dispatched to scripts as `AnimEvent`.
+- ✅ Procedural animation: IK (two-bone, FABRIK), look-at, foot placement (IK on a ground-snapped
+  target), spring bones.
+- ✅ Root-motion extraction applied to `Transform`.
+- ✅ Morph targets (`MorphWeights`). See `docs/ANIMATION.md`. Next: a graph editor UI and GPU morphing.
 
 ## 5. Editor
 - Docking layout. Multi-object editing in the inspector.

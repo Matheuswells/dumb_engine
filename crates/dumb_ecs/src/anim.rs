@@ -166,3 +166,20 @@ impl Default for SpringChain {
         }
     }
 }
+
+/// Blend-shape weights for the entity's `MeshRenderer` model: `weights[i]` drives morph target
+/// `i` of the model (glTF order, 0..1). Scripts call `set` each frame to animate faces etc.
+#[derive(Component, Editor, Clone, Debug, Default, PartialEq)]
+pub struct MorphWeights {
+    pub weights: Vec<f32>,
+}
+
+impl MorphWeights {
+    /// Set target `index`, growing the list as needed.
+    pub fn set(&mut self, index: usize, weight: f32) {
+        if self.weights.len() <= index {
+            self.weights.resize(index + 1, 0.0);
+        }
+        self.weights[index] = weight;
+    }
+}
