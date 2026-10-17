@@ -1184,6 +1184,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dumb_net"
+version = "0.3.3"
+dependencies = [
+ "dumb_core",
+ "dumb_reflect",
+ "glam 0.30.10",
+ "log",
+ "uuid",
+]
+
+[[package]]
 name = "dumb_physics"
 version = "0.3.3"
 dependencies = [
