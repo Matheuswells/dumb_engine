@@ -39,11 +39,13 @@ pub struct NetConfig {
     pub keepalive: f64,
     /// How long a timed-out session can still be resumed by a reconnect.
     pub reconnect_grace: f64,
+    /// Incoming datagrams per second allowed from one connection (token bucket, burst = 1 s).
+    pub max_packets_per_sec: f64,
 }
 
 impl Default for NetConfig {
     fn default() -> Self {
-        Self { timeout: 5.0, resend_interval: 0.1, keepalive: 0.5, reconnect_grace: 30.0 }
+        Self { timeout: 5.0, resend_interval: 0.1, keepalive: 0.5, reconnect_grace: 30.0, max_packets_per_sec: 240.0 }
     }
 }
 
@@ -181,7 +183,11 @@ struct Conn {
     link: Link,
     /// `Some(t)`: timed out at `t`, resumable until the grace period ends.
     lingering: Option<f64>,
+    bucket: f64,
+    bucket_time: f64,
 }
+
+type Authenticator = Box<dyn Fn(&[u8]) -> bool>;
 
 /// Authoritative endpoint: accepts clients and talks to many connections on one socket.
 pub struct Server<S: Datagram> {
@@ -191,6 +197,8 @@ pub struct Server<S: Datagram> {
     by_addr: HashMap<SocketAddr, u64>,
     next_session: u64,
     events: Vec<NetEvent>,
+    cookie_keys: (std::collections::hash_map::RandomState, std::collections::hash_map::RandomState),
+    authenticator: Option<Authenticator>,
 }
 
 impl<S: Datagram> Server<S> {
@@ -200,11 +208,26 @@ impl<S: Datagram> Server<S> {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1);
-        Self { socket, cfg, conns: HashMap::new(), by_addr: HashMap::new(), next_session: seed | 1, events: Vec::new() }
+        Self { socket, cfg, conns: HashMap::new(), by_addr: HashMap::new(), next_session: seed | 1,
+            events: Vec::new(),
+            cookie_keys: Default::default(),
+            authenticator: None,
+        }
     }
 
     pub fn socket_mut(&mut self) -> &mut S {
         &mut self.socket
+    }
+
+    /// Requires clients to present a token the callback accepts (e.g. a login ticket).
+    pub fn set_authenticator(&mut self, f: impl Fn(&[u8]) -> bool + 'static) {
+        self.authenticator = Some(Box::new(f));
+    }
+
+    /// Address cookie for the 10 s window `bucket`: keyed hash, unguessable off-path.
+    fn cookie(&self, addr: SocketAddr, bucket: u64) -> u64 {
+        use std::hash::BuildHasher;
+        self.cookie_keys.0.hash_one((addr, bucket)) ^ self.cookie_keys.1.hash_one((bucket, addr)).rotate_left(32)
     }
 
     pub fn connection_count(&self) -> usize {
@@ -240,7 +263,14 @@ impl<S: Datagram> Server<S> {
                 }
                 wire::DATA => {
                     // The sender address must match the session: other sources are ignored.
+                    let rate = self.cfg.max_packets_per_sec;
                     if let Some(c) = self.conns.get_mut(&session).filter(|c| c.addr == from && c.lingering.is_none()) {
+                        c.bucket = (c.bucket + (now - c.bucket_time) * rate).min(rate);
+                        c.bucket_time = now;
+                        if c.bucket < 1.0 {
+                            continue;
+                        }
+                        c.bucket -= 1.0;
                         for (channel, data) in c.link.receive(body, now) {
                             self.events.push(NetEvent::Message { id: ConnectionId(session), channel, data });
                         }
@@ -286,8 +316,26 @@ impl<S: Datagram> Server<S> {
                 return;
             }
         }
-        let resume = body.get(..8).map(|b| u64::from_le_bytes(b.try_into().unwrap()));
-        if let Some(s) = resume.filter(|s| self.conns.contains_key(s)) {
+        // Body: cookie u64 | resume session u64 (0 = none) | auth token.
+        let mut r = Reader(body);
+        let (Some(cookie), Some(resume)) = (r.take(8), r.take(8)) else { return };
+        let cookie = u64::from_le_bytes(cookie.try_into().unwrap());
+        let resume = u64::from_le_bytes(resume.try_into().unwrap());
+        let token = r.0;
+        let bucket = (now / 10.0) as u64;
+        if cookie != self.cookie(from, bucket) && (bucket == 0 || cookie != self.cookie(from, bucket - 1)) {
+            // Prove the source address is real before spending any state on it. The challenge
+            // is smaller than the Connect that triggers it, so it cannot amplify.
+            let mut p = wire::header(wire::CHALLENGE, 0);
+            p.extend_from_slice(&self.cookie(from, bucket).to_le_bytes());
+            self.socket.send_to(from, &p);
+            return;
+        }
+        if self.authenticator.as_ref().is_some_and(|f| !f(token)) {
+            self.socket.send_to(from, &wire::header(wire::REJECT, 0));
+            return;
+        }
+        if let Some(s) = Some(resume).filter(|s| self.conns.contains_key(s)) {
             let c = self.conns.get_mut(&s).unwrap();
             let old = c.addr;
             c.addr = from;
@@ -301,7 +349,10 @@ impl<S: Datagram> Server<S> {
         }
         let s = self.next_session;
         self.next_session = self.next_session.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) | 1;
-        self.conns.insert(s, Conn { addr: from, link: Link::new(now), lingering: None });
+        self.conns.insert(
+            s,
+            Conn { addr: from, link: Link::new(now), lingering: None, bucket: self.cfg.max_packets_per_sec, bucket_time: now },
+        );
         self.by_addr.insert(from, s);
         self.accept(from, s);
         self.events.push(NetEvent::Connected(ConnectionId(s)));
@@ -329,6 +380,8 @@ pub struct Client<S: Datagram> {
     link: Link,
     attempt_started: f64,
     last_connect_sent: f64,
+    cookie: u64,
+    token: Vec<u8>,
 }
 
 impl<S: Datagram> Client<S> {
@@ -343,7 +396,14 @@ impl<S: Datagram> Client<S> {
             link: Link::new(0.0),
             attempt_started: 0.0,
             last_connect_sent: f64::NEG_INFINITY,
+            cookie: 0,
+            token: Vec::new(),
         }
+    }
+
+    /// Credentials sent with the connection request (checked by the server's authenticator).
+    pub fn set_auth_token(&mut self, token: &[u8]) {
+        self.token = token.to_vec();
     }
 
     pub fn state(&self) -> ClientState {
@@ -410,6 +470,16 @@ impl<S: Datagram> Client<S> {
                     let id = ConnectionId(session);
                     events.push(if resumed { NetEvent::Reconnected(id) } else { NetEvent::Connected(id) });
                 }
+                (wire::CHALLENGE, ClientState::Connecting) => {
+                    if let Some(b) = body.get(..8) {
+                        self.cookie = u64::from_le_bytes(b.try_into().unwrap());
+                        self.last_connect_sent = f64::NEG_INFINITY;
+                    }
+                }
+                (wire::REJECT, ClientState::Connecting) => {
+                    self.state = ClientState::Disconnected;
+                    events.push(NetEvent::ConnectFailed);
+                }
                 (wire::DATA, ClientState::Connected) if self.session == Some(session) => {
                     for (channel, data) in self.link.receive(body, now) {
                         events.push(NetEvent::Message { id: ConnectionId(session), channel, data });
@@ -431,9 +501,10 @@ impl<S: Datagram> Client<S> {
                 } else if now - self.last_connect_sent >= self.cfg.resend_interval.max(0.05) * 2.5 {
                     self.last_connect_sent = now;
                     let mut p = wire::header(wire::CONNECT, 0);
-                    if let (true, Some(s)) = (self.resuming, self.session) {
-                        p.extend_from_slice(&s.to_le_bytes());
-                    }
+                    p.extend_from_slice(&self.cookie.to_le_bytes());
+                    let resume = if self.resuming { self.session.unwrap_or(0) } else { 0 };
+                    p.extend_from_slice(&resume.to_le_bytes());
+                    p.extend_from_slice(&self.token);
                     self.socket.send_to(self.server, &p);
                 }
             }

@@ -143,14 +143,73 @@ fn ignores_foreign_sources_and_garbage() {
     intruder.send_to(addr(1), b"junk");
     let mut client = Client::new(net.socket(addr(2)), addr(1), NetConfig::default());
     client.connect(0.0);
-    client.update(0.0);
-    server.update(0.0);
-    client.update(0.01);
+    for i in 0..6 {
+        let t = i as f64 * 0.01;
+        client.update(t);
+        server.update(t);
+    }
+    client.update(0.06);
     let id = client.id().unwrap();
     // Valid session id, wrong source address: dropped.
     let mut p = wire::header(wire::DATA, id.0);
     p.extend_from_slice(&0u16.to_le_bytes());
     p.extend_from_slice(&[0, 0, 0, 1, 0, b'x']);
     intruder.send_to(addr(1), &p);
-    assert!(server.update(0.02).iter().all(|e| !matches!(e, NetEvent::Message { .. })));
+    assert!(server.update(0.07).iter().all(|e| !matches!(e, NetEvent::Message { .. })));
+}
+
+#[test]
+fn cookie_challenge_blocks_spoofed_connects() {
+    let net = MemNet::default();
+    let mut server = Server::new(net.socket(addr(1)), NetConfig::default());
+    let mut spoofer = net.socket(addr(3));
+    // A Connect with a made-up cookie gets only a small challenge and creates no state.
+    let mut p = wire::header(wire::CONNECT, 0);
+    p.extend_from_slice(&[0u8; 16]);
+    spoofer.send_to(addr(1), &p);
+    assert!(server.update(0.0).is_empty());
+    assert_eq!(server.connection_count(), 0);
+    let (_, reply) = spoofer.recv_from().unwrap();
+    assert!(reply.len() < p.len());
+    assert_eq!(wire::parse_header(&reply).unwrap().0, wire::CHALLENGE);
+    assert!(spoofer.recv_from().is_none());
+}
+
+#[test]
+fn authenticator_rejects_bad_tokens() {
+    let mut r = Rig::new(EmulatorConfig::default(), NetConfig::default());
+    r.server.set_authenticator(|t| t == b"let-me-in");
+    r.client.set_auth_token(b"wrong");
+    r.client.connect(0.0);
+    r.run(1.0);
+    assert_eq!(r.cev, vec![NetEvent::ConnectFailed]);
+    assert_eq!(r.server.connection_count(), 0);
+    r.client.set_auth_token(b"let-me-in");
+    r.client.connect(r.now);
+    r.run(1.0);
+    assert_eq!(r.client.state(), ClientState::Connected);
+}
+
+#[test]
+fn per_connection_rate_limit_drops_floods() {
+    let net = MemNet::default();
+    let cfg = NetConfig { max_packets_per_sec: 10.0, ..Default::default() };
+    let mut server = Server::new(net.socket(addr(1)), cfg);
+    let mut client = Client::new(net.socket(addr(2)), addr(1), cfg);
+    client.connect(0.0);
+    for i in 0..10 {
+        client.update(i as f64 * 0.01);
+        server.update(i as f64 * 0.01);
+    }
+    let id = client.id().unwrap();
+    let mut flood = net.socket(addr(2)); // same address as the client
+    for i in 0..100u16 {
+        let mut p = wire::header(wire::DATA, id.0);
+        p.extend_from_slice(&0u16.to_le_bytes());
+        p.extend_from_slice(&[1, (i & 0xff) as u8, (i >> 8) as u8, 1, 0, 0]);
+        flood.send_to(addr(1), &p);
+    }
+    let got = server.update(0.2).iter().filter(|e| matches!(e, NetEvent::Message { .. })).count();
+    assert!(got <= 11, "{got} messages passed the limiter");
+    assert!(got > 0);
 }

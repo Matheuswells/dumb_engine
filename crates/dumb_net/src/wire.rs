@@ -9,6 +9,10 @@ pub const CONNECT: u8 = 1;
 pub const ACCEPT: u8 = 2;
 pub const DISCONNECT: u8 = 3;
 pub const DATA: u8 = 4;
+/// Server → client: here is your address cookie, resend Connect with it.
+pub const CHALLENGE: u8 = 5;
+/// Server → client: authentication failed.
+pub const REJECT: u8 = 6;
 
 pub fn header(kind: u8, session: u64) -> Vec<u8> {
     let mut v = Vec::with_capacity(HEADER + 64);
