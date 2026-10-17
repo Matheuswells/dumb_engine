@@ -25,6 +25,7 @@ pub enum AssetKind {
     Audio,
     Script,
     Shader,
+    AnimGraph,
     Other,
 }
 
@@ -41,6 +42,7 @@ impl AssetKind {
             "wav" | "ogg" | "mp3" | "flac" => AssetKind::Audio,
             "rs" => AssetKind::Script,
             "wgsl" => AssetKind::Shader,
+            "animgraph" => AssetKind::AnimGraph,
             _ => AssetKind::Other,
         }
     }
@@ -56,6 +58,7 @@ impl AssetKind {
             AssetKind::Audio => "audio",
             AssetKind::Script => "script",
             AssetKind::Shader => "shader",
+            AssetKind::AnimGraph => "animgraph",
             AssetKind::Other => "other",
         }
     }
@@ -70,6 +73,7 @@ impl AssetKind {
             AssetKind::Audio => "🔊",
             AssetKind::Script => "📜",
             AssetKind::Shader => "✨",
+            AssetKind::AnimGraph => "🎞",
             AssetKind::Other => "📄",
         }
     }
@@ -254,11 +258,14 @@ pub struct AssetDatabase {
     models: HashMap<AssetId, Arc<ModelData>>,
     textures: HashMap<AssetId, Arc<TextureData>>,
     materials: HashMap<AssetId, MaterialData>,
+    anim_graphs: std::sync::Mutex<HashMap<AssetId, (SystemTime, Option<Arc<crate::anim::AnimGraph>>)>>,
     /// Versions of in-memory materials that have no file (editor previews).
     virtual_versions: HashMap<AssetId, u64>,
     /// Models scripts made at runtime (`set_runtime_mesh`), and those removed since renderers
     /// last asked.
     runtime_meshes: HashSet<AssetId>,
+    /// Morphed copies: derived id -> (base version, weights) they were built with.
+    morph_cache: HashMap<AssetId, (u64, Vec<f32>)>,
     removed_models: Vec<AssetId>,
     job_tx: Sender<JobResult>,
     job_rx: Receiver<JobResult>,
@@ -337,8 +344,10 @@ impl AssetDatabase {
             models: HashMap::new(),
             textures: HashMap::new(),
             materials: HashMap::new(),
+            anim_graphs: Default::default(),
             virtual_versions: HashMap::new(),
             runtime_meshes: HashSet::new(),
+            morph_cache: HashMap::new(),
             removed_models: Vec::new(),
             job_tx,
             job_rx,
@@ -580,7 +589,7 @@ impl AssetDatabase {
             }).collect();
             let indices = part.indices.iter().map(|i| map[i]).collect();
             let aabb = dumb_core::Aabb::from_points(verts.iter().map(|v| dumb_core::Vec3::from_array(v.position)));
-            primitives.push(Primitive { vertices: verts, indices, material: Some(slot), aabb, lods: Vec::new() });
+            primitives.push(Primitive { vertices: verts, indices, material: Some(slot), aabb, lods: Vec::new(), morphs: Vec::new() });
             if !part.material.is_none() {
                 remap.push((slot, part.material));
             }
@@ -599,12 +608,51 @@ impl AssetDatabase {
         self.runtime_meshes.insert(id);
     }
 
+    /// Per-instance copy of `base` with its morph targets applied at `weights` (blend shapes).
+    /// Rebuilt only when the weights or the base model change; the copy keeps the base's
+    /// materials, skinning and LODs. Returns false while the base model isn't loaded.
+    pub fn set_morphed_model(&mut self, id: AssetId, base_id: AssetId, weights: &[f32]) -> bool {
+        let Some(base) = self.models.get(&base_id).cloned() else { return false };
+        let base_version = self.version(base_id);
+        if self.morph_cache.get(&id).is_some_and(|(v, w)| *v == base_version && w == weights) && self.models.contains_key(&id) {
+            return true;
+        }
+        let mut model = (*base).clone();
+        let mut slots = Vec::new();
+        for mesh in &mut model.meshes {
+            for prim in &mut mesh.primitives {
+                if !prim.morphs.is_empty() {
+                    prim.vertices = prim.morphed_vertices(weights);
+                    prim.aabb = dumb_core::Aabb::from_points(prim.vertices.iter().map(|v| dumb_core::Vec3::from_array(v.position)));
+                    prim.morphs.clear();
+                }
+                if let Some(m) = prim.material {
+                    slots.push(m);
+                }
+            }
+        }
+        for slot in slots {
+            if !model.material_remap.iter().any(|(s, _)| *s == slot) {
+                model.material_remap.push((slot, base.material_id(base_id, slot)));
+            }
+        }
+        // Morphs can move vertices outside the cached bounds.
+        model.bounds_cache = None;
+        let v = self.next_version();
+        self.models.insert(id, Arc::new(model));
+        self.virtual_versions.insert(id, v);
+        self.runtime_meshes.insert(id);
+        self.morph_cache.insert(id, (base_version, weights.to_vec()));
+        true
+    }
+
     /// Free a runtime model (CPU here; renderers drop their GPU copy, see `take_removed_models`).
     pub fn remove_runtime_mesh(&mut self, id: AssetId) {
         if self.runtime_meshes.remove(&id) {
             self.models.remove(&id);
             self.virtual_versions.remove(&id);
             self.removed_models.push(id);
+            self.morph_cache.remove(&id);
         }
     }
 
@@ -827,6 +875,33 @@ impl AssetDatabase {
         }
         self.load(id);
         None
+    }
+
+    /// Parsed `.animgraph` asset, re-read when the file changes. `None` if missing or invalid
+    /// (the error is logged once per change).
+    pub fn anim_graph(&self, id: AssetId) -> Option<Arc<crate::anim::AnimGraph>> {
+        let e = self.entries.get(&id).filter(|e| e.kind == AssetKind::AnimGraph)?;
+        let path = self.assets_root.join(&e.path);
+        let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+        let mut cache = self.anim_graphs.lock().ok()?;
+        if let Some((t, g)) = cache.get(&id) {
+            if *t == mtime {
+                return g.clone();
+            }
+        }
+        let parsed = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| crate::anim::AnimGraph::from_json(&s));
+        match parsed {
+            Ok(g) => {
+                let g = Arc::new(g);
+                cache.insert(id, (mtime, Some(g.clone())));
+                Some(g)
+            }
+            Err(err) => {
+                log::warn!("animation graph {}: {err}", e.path);
+                cache.insert(id, (mtime, None));
+                None
+            }
+        }
     }
 
     pub fn material(&mut self, id: AssetId) -> Option<MaterialData> {
@@ -1158,6 +1233,41 @@ fn import_model(path: &Path, id: AssetId, scale: f32, blender: Option<&Path>, ca
 mod tests {
     use super::is_ignored;
     use std::path::Path;
+
+    #[test]
+    fn morphed_model_applies_weights_and_caches() {
+        use crate::model::*;
+        use dumb_core::{AssetId, Vec3};
+        let dir = std::env::temp_dir().join(format!("dumb_morph_db_{}", std::process::id()));
+        let mut db = super::AssetDatabase::open(&dir).unwrap();
+        let base_id = AssetId::from_name("base");
+        let prim = Primitive {
+            vertices: vec![Vertex::default(); 3],
+            indices: vec![0, 1, 2],
+            material: Some(0),
+            morphs: vec![MorphTarget { name: "up".into(), position_deltas: vec![Vec3::Y; 3], normal_deltas: vec![] }],
+            ..Default::default()
+        };
+        let base = ModelData {
+            nodes: vec![Node { mesh: Some(0), ..Default::default() }],
+            roots: vec![0],
+            meshes: vec![MeshData { name: "m".into(), primitives: vec![prim] }],
+            ..Default::default()
+        };
+        assert!(!db.set_morphed_model(AssetId::from_name("d"), base_id, &[1.0]), "base not loaded");
+        db.models.insert(base_id, std::sync::Arc::new(base));
+        let d = AssetId::from_name("d");
+        assert!(db.set_morphed_model(d, base_id, &[0.5]));
+        let m = db.model_loaded(d).unwrap();
+        assert_eq!(m.meshes[0].primitives[0].vertices[0].position, [0.0, 0.5, 0.0]);
+        assert!(m.meshes[0].primitives[0].morphs.is_empty());
+        assert_eq!(m.material_id(d, 0), db.model_loaded(base_id).unwrap().material_id(base_id, 0));
+        let v = db.version(d);
+        assert!(db.set_morphed_model(d, base_id, &[0.5]));
+        assert_eq!(db.version(d), v, "unchanged weights do not rebuild");
+        assert!(db.set_morphed_model(d, base_id, &[1.0]));
+        assert_ne!(db.version(d), v);
+    }
 
     #[test]
     fn ignores_backups_and_sidecars() {

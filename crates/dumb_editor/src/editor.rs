@@ -1150,6 +1150,12 @@ impl Editor {
                     crate::script_tools::open_in_code_editor(&p, None, None);
                 }
             }
+            // Animation graphs are JSON: edit them in the code editor.
+            Some(AssetKind::AnimGraph) => {
+                if let Some(p) = self.db.abs_path(id) {
+                    crate::script_tools::open_in_code_editor(&p, None, None);
+                }
+            }
             Some(AssetKind::Script) | Some(AssetKind::Other) | Some(AssetKind::Texture) | Some(AssetKind::Audio) => {
                 if let Some(p) = self.db.abs_path(id) {
                     #[cfg(windows)]

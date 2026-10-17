@@ -58,7 +58,7 @@ pub fn cube() -> Primitive {
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
-    Primitive { vertices: verts, indices, material: None, aabb: Aabb::EMPTY, lods: Vec::new() }
+    Primitive { vertices: verts, indices, material: None, aabb: Aabb::EMPTY, lods: Vec::new(), morphs: Vec::new() }
 }
 
 pub fn sphere(segments: u32, rings: u32) -> Primitive {
@@ -80,7 +80,7 @@ pub fn sphere(segments: u32, rings: u32) -> Primitive {
             indices.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
         }
     }
-    Primitive { vertices: verts, indices, material: None, aabb: Aabb::EMPTY, lods: Vec::new() }
+    Primitive { vertices: verts, indices, material: None, aabb: Aabb::EMPTY, lods: Vec::new(), morphs: Vec::new() }
 }
 
 pub fn plane(size: f32) -> Primitive {
@@ -91,7 +91,7 @@ pub fn plane(size: f32) -> Primitive {
         v(Vec3::new(h, 0.0, h), Vec3::Y, [size, size]),
         v(Vec3::new(-h, 0.0, h), Vec3::Y, [0.0, size]),
     ];
-    Primitive { vertices: verts, indices: vec![0, 2, 1, 0, 3, 2], material: None, aabb: Aabb::EMPTY, lods: Vec::new() }
+    Primitive { vertices: verts, indices: vec![0, 2, 1, 0, 3, 2], material: None, aabb: Aabb::EMPTY, lods: Vec::new(), morphs: Vec::new() }
 }
 
 pub fn cylinder(segments: u32) -> Primitive {
@@ -124,5 +124,5 @@ pub fn cylinder(segments: u32) -> Primitive {
             }
         }
     }
-    Primitive { vertices: verts, indices, material: None, aabb: Aabb::EMPTY, lods: Vec::new() }
+    Primitive { vertices: verts, indices, material: None, aabb: Aabb::EMPTY, lods: Vec::new(), morphs: Vec::new() }
 }

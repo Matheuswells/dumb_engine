@@ -9,6 +9,7 @@ dumb_reflect.workspace = true
 dumb_ecs.workspace = true
 dumb_derive.workspace = true
 serde.workspace = true
+serde_json = "1"
 ron.workspace = true
 uuid.workspace = true
 log.workspace = true

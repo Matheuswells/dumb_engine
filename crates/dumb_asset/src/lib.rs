@@ -1,5 +1,6 @@
 //! Asset pipeline: database, importers (glTF, Blender, images), materials, models.
 
+pub mod anim;
 pub mod autotex;
 pub mod database;
 pub mod import_blender;

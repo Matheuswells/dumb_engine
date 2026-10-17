@@ -226,6 +226,13 @@ pub struct Animator {
     pub blend_clip: String,
     #[editor(range = 0.0..=1.0)]
     pub blend: f32,
+    /// Apply the root node's motion to this entity's `Transform` and play the clip in place.
+    pub root_motion: bool,
+    /// Root node name for root motion (empty = first root node).
+    pub root_node: String,
+    /// Clip time at the previous update (for events and root motion deltas).
+    #[editor(hidden)]
+    pub prev_time: f32,
 }
 
 impl Default for Animator {
@@ -238,6 +245,9 @@ impl Default for Animator {
             time: 0.0,
             blend_clip: String::new(),
             blend: 0.0,
+            root_motion: false,
+            root_node: String::new(),
+            prev_time: 0.0,
         }
     }
 }
@@ -283,6 +293,11 @@ pub(crate) fn register_builtin(w: &mut World) {
     w.register_type::<Animator>();
     w.register_type::<PrefabInstance>();
     w.register_type::<crate::ai::AiAgent>();
+    w.register_type::<crate::anim::AnimGraphPlayer>();
+    w.register_type::<crate::anim::IkConstraint>();
+    w.register_type::<crate::anim::LookAtConstraint>();
+    w.register_type::<crate::anim::SpringChain>();
+    w.register_type::<crate::anim::MorphWeights>();
     w.register_type::<crate::streaming::StreamingCell>();
     w.register_type::<crate::hud::UiText>();
     w.register_type::<crate::hud::UiBar>();

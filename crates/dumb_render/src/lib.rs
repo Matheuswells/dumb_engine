@@ -6,6 +6,7 @@
 //!   an offscreen target that egui displays as an image; the swapchain only receives egui.
 //! * Forward PBR with GPU skinning, frustum culling, debug lines, wireframe.
 
+pub mod animation;
 mod assets;
 pub mod custom_shader;
 pub mod extract;

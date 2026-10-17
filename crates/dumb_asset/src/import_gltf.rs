@@ -109,7 +109,17 @@ pub fn import(path: &Path, owner: AssetId, scale: f32) -> Result<ModelData, Stri
                 compute_tangents(&mut verts, &indices);
             }
             let aabb = Aabb::from_points(verts.iter().map(|v| Vec3::from(v.position)));
-            out.primitives.push(Primitive { vertices: verts, indices, material: prim.material().index(), aabb, lods: Vec::new() });
+            let mut morphs = Vec::new();
+            for (ti, (pos, nrm, _tan)) in reader.read_morph_targets().enumerate() {
+                let mut t = MorphTarget {
+                    name: String::new(),
+                    position_deltas: pos.map(|p| p.map(Vec3::from).collect()).unwrap_or_default(),
+                    normal_deltas: nrm.map(|n| n.map(Vec3::from).collect()).unwrap_or_default(),
+                };
+                t.name = format!("Morph{ti}");
+                morphs.push(t);
+            }
+            out.primitives.push(Primitive { vertices: verts, indices, material: prim.material().index(), aabb, lods: Vec::new(), morphs });
         }
         model.meshes.push(out);
     }
