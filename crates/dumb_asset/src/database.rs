@@ -586,7 +586,7 @@ impl AssetDatabase {
             }).collect();
             let indices = part.indices.iter().map(|i| map[i]).collect();
             let aabb = dumb_core::Aabb::from_points(verts.iter().map(|v| dumb_core::Vec3::from_array(v.position)));
-            primitives.push(Primitive { vertices: verts, indices, material: Some(slot), aabb, lods: Vec::new() });
+            primitives.push(Primitive { vertices: verts, indices, material: Some(slot), aabb, lods: Vec::new(), morphs: Vec::new() });
             if !part.material.is_none() {
                 remap.push((slot, part.material));
             }

@@ -25,6 +25,35 @@ pub struct Primitive {
     pub aabb: Aabb,
     /// Generated LOD index buffers (level 1, 2, ...) over the same vertices.
     pub lods: Vec<Vec<u32>>,
+    /// Morph targets (blend shapes): per-vertex deltas added by weight.
+    pub morphs: Vec<MorphTarget>,
+}
+
+/// One blend shape of a primitive. Empty delta lists mean "no change".
+#[derive(Clone, Debug, Default)]
+pub struct MorphTarget {
+    pub name: String,
+    pub position_deltas: Vec<Vec3>,
+    pub normal_deltas: Vec<Vec3>,
+}
+
+impl Primitive {
+    /// Vertices with the weighted morph targets applied (`weights[i]` for target `i`).
+    pub fn morphed_vertices(&self, weights: &[f32]) -> Vec<Vertex> {
+        let mut out = self.vertices.clone();
+        for (t, w) in self.morphs.iter().zip(weights) {
+            if *w == 0.0 {
+                continue;
+            }
+            for (v, d) in out.iter_mut().zip(&t.position_deltas) {
+                v.position = (Vec3::from(v.position) + *d * *w).into();
+            }
+            for (v, d) in out.iter_mut().zip(&t.normal_deltas) {
+                v.normal = (Vec3::from(v.normal) + *d * *w).normalize_or(Vec3::Y).into();
+            }
+        }
+        out
+    }
 }
 
 impl Primitive {
@@ -401,5 +430,22 @@ impl ModelData {
             }
         }
         Some(count - 1)
+    }
+}
+
+#[cfg(test)]
+mod morph_tests {
+    use super::*;
+
+    #[test]
+    fn morph_weights_blend_deltas() {
+        let mut p = Primitive::default();
+        p.vertices = vec![Vertex { normal: [0.0, 1.0, 0.0], ..Default::default() }; 2];
+        p.morphs.push(MorphTarget { name: "up".into(), position_deltas: vec![Vec3::Y, Vec3::Y * 2.0], normal_deltas: vec![] });
+        p.morphs.push(MorphTarget { name: "x".into(), position_deltas: vec![Vec3::X, Vec3::X], normal_deltas: vec![] });
+        let v = p.morphed_vertices(&[0.5, 1.0]);
+        assert_eq!(v[0].position, [1.0, 0.5, 0.0]);
+        assert_eq!(v[1].position, [1.0, 1.0, 0.0]);
+        assert_eq!(p.morphed_vertices(&[])[0].position, [0.0; 3]);
     }
 }
