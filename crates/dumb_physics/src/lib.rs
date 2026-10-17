@@ -149,6 +149,20 @@ impl Physics {
         self.world.gravity = v(g);
     }
 
+    /// The world's local origin moved: local positions decrease by `shift` (see
+    /// `dumb_ecs::origin::rebase`). Moves every body with it, keeping velocities.
+    pub fn shift_origin(&mut self, shift: Vec3) {
+        for link in self.links.values_mut() {
+            let Some(rb) = self.world.bodies.get_mut(link.body) else { continue };
+            let p = pose(uv(rb.translation()) - shift, uq(*rb.rotation()));
+            rb.set_position(p, false);
+            if matches!(link.kind, LinkKind::Kinematic | LinkKind::Character) {
+                rb.set_next_kinematic_position(p);
+            }
+            link.last_pos -= shift;
+        }
+    }
+
     /// Advance the simulation by `dt` seconds of game time (in fixed steps).
     /// Call `world.update_transforms()` before; call it again afterwards.
     pub fn step(&mut self, world: &mut World, db: &AssetDatabase, dt: f32) {
@@ -605,6 +619,37 @@ mod tests {
         assert_eq!(hit.entity, ball);
         assert!((hit.point.y - 1.0).abs() < 0.05);
         assert_eq!(p.overlap_sphere(Vec3::new(0.0, 0.5, 0.0), 0.2), vec![ball]);
+    }
+
+    #[test]
+    fn origin_shift_keeps_bodies_resting() {
+        let db = db();
+        let mut w = World::new();
+        let far = Vec3::new(5000.0, 0.0, -3000.0);
+        let ground = w.spawn_named("ground");
+        w.insert(ground, Collider::cuboid(Vec3::new(20.0, 1.0, 20.0)));
+        w.get_mut::<Transform>(ground).unwrap().translation = far + Vec3::new(0.0, -0.5, 0.0);
+        let ball = w.spawn_named("ball");
+        w.get_mut::<Transform>(ball).unwrap().translation = far + Vec3::new(0.0, 3.0, 0.0);
+        w.insert(ball, RigidBody::dynamic());
+        w.insert(ball, Collider::sphere(1.0));
+        w.update_transforms();
+        let mut p = Physics::new(Vec3::new(0.0, -9.81, 0.0));
+        for _ in 0..20 {
+            p.step(&mut w, &db, 1.0 / 60.0);
+        }
+        // Rebase mid-fall, as the runtime does.
+        let shift = dumb_ecs::origin::rebase(&mut w, far, &dumb_ecs::OriginSettings::default()).unwrap();
+        p.shift_origin(shift);
+        w.update_transforms();
+        let before = w.get::<Transform>(ball).unwrap().translation;
+        assert!(before.x.abs() < 1.0 && before.z.abs() < 1.0, "{before:?}");
+        for _ in 0..240 {
+            p.step(&mut w, &db, 1.0 / 60.0);
+        }
+        let t = w.get::<Transform>(ball).unwrap().translation;
+        assert!((t.y - 0.5).abs() < 0.05, "ball should land on the shifted ground, {t:?}");
+        assert!(t.x.abs() < 0.1 && t.z.abs() < 0.1);
     }
 
     #[test]

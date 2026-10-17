@@ -52,6 +52,10 @@ pub struct ProjectSettings {
     /// Main-thread time per frame for spawning/despawning streamed cells (ms).
     #[serde(default = "default_stream_budget")]
     pub stream_budget_ms: f32,
+    /// Floating origin: the world is shifted back toward (0, 0, 0) when the camera strays
+    /// too far, so `f32` stays precise in huge worlds.
+    #[serde(default)]
+    pub origin: dumb_ecs::OriginSettings,
     /// Performance overlay shown in the game at start (F3 cycles it while playing).
     #[serde(default)]
     pub perf_overlay: perf::PerfOverlay,
@@ -123,6 +127,7 @@ impl Default for ProjectSettings {
             build: BuildSettings::default(),
             ai: Default::default(),
             stream_budget_ms: default_stream_budget(),
+            origin: Default::default(),
             perf_overlay: Default::default(),
         }
     }
@@ -247,6 +252,7 @@ pub fn update_animators(world: &mut World, db: &AssetDatabase, dt: f32) {
 pub struct SimStats {
     pub ai: dumb_ecs::AiStats,
     pub stream: streaming::StreamStats,
+    pub terrain: dumb_ecs::TerrainStats,
 }
 
 /// One simulation frame: world streaming, AI scheduling, scripts, physics, animation.
@@ -267,12 +273,26 @@ pub fn simulate(
     world.update_transforms();
     hud.begin_frame();
     dumb_ecs::hud::apply_button_clicks(world, &hud.clicked);
-    let focus = dumb_render::find_primary_camera(world).map(|c| world.global_matrix(c).w_axis.truncate());
+    let mut focus = dumb_render::find_primary_camera(world).map(|c| world.global_matrix(c).w_axis.truncate());
+    if let Some(f) = focus {
+        if let Some(shift) = dumb_ecs::origin::rebase(world, f, &settings.origin) {
+            if let Some(p) = physics.as_deref_mut() {
+                p.shift_origin(shift);
+            }
+            world.update_transforms();
+            focus = Some(f - shift);
+            log::info!("floating origin moved by {shift:?}");
+        }
+    }
     let mut stats = SimStats::default();
     if let Some(s) = streamer {
         let budget = std::time::Duration::from_secs_f32(settings.stream_budget_ms.max(0.1) / 1000.0);
         dumb_core::profile_scope!("streaming");
         stats.stream = s.update(world, db, focus, budget);
+        {
+            dumb_core::profile_scope!("terrain");
+            stats.terrain = s.update_terrain(world, meshes, focus);
+        }
         world.update_transforms();
     }
     // Decide which NPCs think this frame, before scripts run.

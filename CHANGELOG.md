@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Massive worlds
+- **Floating origin.** When the camera is more than 2 km (configurable) from (0, 0, 0), the
+  world, physics bodies included, shifts back toward it so `f32` stays precise. The true
+  position is in the `WorldOrigin` resource (`f64`). Project Preferences ▸ Floating origin.
+- **Procedural terrain.** A `Terrain` component streams heightfield chunks around the camera:
+  built on worker threads, distance LOD with skirts, mesh colliders at full detail, endless
+  and seamless in true world space. `Terrain::height_at` gives the ground height to scripts.
+
 ## v0.3.3
 
 Scripts must be rebuilt (ABI abi-10); the editor does it on its own.

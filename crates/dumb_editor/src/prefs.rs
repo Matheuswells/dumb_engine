@@ -320,6 +320,17 @@ fn editor_tab(ui: &mut egui::Ui, s: &mut EditorSettings) -> bool {
         });
     }
 
+    section(ui, "Floating origin");
+    egui::Grid::new("proj_origin").num_columns(2).show(ui, |ui| {
+        ui.label("Rebase distance");
+        c |= ui.add(egui::DragValue::new(&mut p.origin.threshold).speed(10.0).range(0.0..=1_000_000.0).suffix(" m")).changed();
+        ui.end_row();
+        ui.label("Shift step");
+        c |= ui.add(egui::DragValue::new(&mut p.origin.snap).speed(10.0).range(1.0..=100_000.0).suffix(" m")).changed();
+        ui.end_row();
+    });
+    ui.weak("When the camera is farther than this from (0, 0, 0), the world shifts back. 0 = off. The true position is in the WorldOrigin resource.");
+
     section(ui, "Scripts");
     c |= ui.checkbox(&mut s.scripts_build_on_save, "Build on save").changed();
     c |= ui.checkbox(&mut s.scripts_auto_reload, "Reload the library when it changes").changed();

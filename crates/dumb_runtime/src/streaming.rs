@@ -37,9 +37,16 @@ pub struct Streamer {
     jobs: HashMap<Entity, Job>,
     /// Parsed scenes, shared by cells that use the same scene asset.
     cache: HashMap<AssetId, Arc<SceneData>>,
+    /// Procedural terrain chunks (`Terrain` components).
+    terrain: dumb_ecs::TerrainStreamer,
 }
 
 impl Streamer {
+    /// Advance the procedural terrain (`Terrain` components) around `focus`.
+    pub fn update_terrain(&mut self, world: &mut World, meshes: &mut dumb_ecs::MeshUploads, focus: Option<Vec3>) -> dumb_ecs::TerrainStats {
+        self.terrain.update(world, meshes, focus)
+    }
+
     /// Advance streaming. `budget` caps the main-thread time spent spawning/despawning.
     pub fn update(&mut self, world: &mut World, db: &AssetDatabase, focus: Option<Vec3>, budget: Duration) -> StreamStats {
         let t0 = Instant::now();
