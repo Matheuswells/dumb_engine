@@ -102,11 +102,13 @@ pub struct InterestUpdate<K> {
 #[derive(Default)]
 pub struct Interest<K: Copy + Eq + std::hash::Hash> {
     known: HashSet<K>,
+    /// Updates in a row an entity was due but didn't fit the budget (raises its priority).
+    starved: HashMap<K, u32>,
 }
 
 impl<K: Copy + Eq + std::hash::Hash + Ord> Interest<K> {
     pub fn new() -> Self {
-        Self { known: HashSet::new() }
+        Self { known: HashSet::new(), starved: HashMap::new() }
     }
 
     pub fn known(&self) -> &HashSet<K> {
@@ -141,6 +143,7 @@ impl<K: Copy + Eq + std::hash::Hash + Ord> Interest<K> {
         for k in self.known.iter().copied().collect::<Vec<_>>() {
             if !keep.contains(&k) {
                 self.known.remove(&k);
+                self.starved.remove(&k);
                 out.despawn.push(k);
             }
         }
@@ -149,19 +152,30 @@ impl<K: Copy + Eq + std::hash::Hash + Ord> Interest<K> {
             self.known.insert(*k);
         }
         // Known entities still inside the keep radius, nearest first.
+        // Distance is divided by how long an entity has been left out, so when the budget can't
+        // cover everything, far entities still get their turn.
         let mut known: Vec<(K, f32)> = self
             .known
             .iter()
             .filter(|k| !out.spawn.contains(k))
-            .filter_map(|k| grid.position(*k).map(|p| (*k, p.distance_squared(center))))
+            .filter_map(|k| {
+                let age = self.starved.get(k).copied().unwrap_or(0) as f32;
+                grid.position(*k).map(|p| (*k, (p.distance_squared(center) + 1.0) / (1.0 + age)))
+            })
             .collect();
         known.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
         for (k, _) in known {
             let c = cost(k);
-            if spent + c > budget {
-                break;
+            // An entry costlier than the whole budget still goes out when it is first in line,
+            // otherwise it would never be sent. Others that don't fit are skipped, not blocking.
+            if spent + c > budget && !(out.update.is_empty() && spent == 0) {
+                if c > 0 {
+                    *self.starved.entry(k).or_insert(0) += 1;
+                }
+                continue;
             }
             spent += c;
+            self.starved.remove(&k);
             out.update.push(k);
         }
         out
@@ -190,6 +204,27 @@ mod tests {
         g.remove(1);
         assert_eq!(ids(&g, 8.0), vec![2]);
         assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn far_and_oversized_entities_are_not_starved() {
+        let mut g = SpatialGrid::new(10.0);
+        for i in 0..4u32 {
+            g.insert(i, Vec3::new(i as f32, 0.0, 0.0));
+        }
+        let mut int = Interest::new();
+        int.update(&g, Vec3::ZERO, 50.0, 1.5, 1000, |_| 10);
+        // Room for one update per round: the farthest still gets served within a few rounds.
+        let mut served = HashSet::new();
+        for _ in 0..40 {
+            served.extend(int.update(&g, Vec3::ZERO, 50.0, 1.5, 10, |_| 10).update);
+        }
+        assert_eq!(served.len(), 4);
+        // An entity costlier than the whole budget goes out alone, and doesn't block others.
+        let u = int.update(&g, Vec3::ZERO, 50.0, 1.5, 10, |k| if k == 0 { 99 } else { 10 });
+        assert_eq!(u.update, vec![0]);
+        let u = int.update(&g, Vec3::ZERO, 50.0, 1.5, 10, |k| if k == 0 { 99 } else { 10 });
+        assert_eq!(u.update.len(), 1);
     }
 
     #[test]

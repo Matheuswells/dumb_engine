@@ -301,7 +301,7 @@ pub fn encode_value(b: &mut Vec<u8>, v: &Value) {
 
 /// Appends a length-prefixed string (strings over 65535 bytes are cut).
 pub fn encode_str(b: &mut Vec<u8>, s: &str) {
-    put_str(b, &s[..s.len().min(u16::MAX as usize)]);
+    put_str(b, s);
 }
 
 /// Reads fields from untrusted bytes; every method returns `None` when the input runs out or
@@ -429,6 +429,23 @@ pub fn decode_delta(bytes: &[u8]) -> Option<Delta> {
 
 // ---- interpolation -----------------------------------------------------------------------
 
+/// Interpolates a rotation (x, y, z, w): takes the short way round and stays unit length.
+fn nlerp_quat(a: &Value, b: &Value, t: f64) -> Value {
+    let (Value::Vec(x), Value::Vec(y)) = (a, b) else { return lerp_value(a, b, t) };
+    if x.len() != 4 || y.len() != 4 {
+        return lerp_value(a, b, t);
+    }
+    let sign = if x.iter().zip(y).map(|(p, q)| p * q).sum::<f32>() < 0.0 { -1.0 } else { 1.0 };
+    let mut v: Vec<f32> = x.iter().zip(y).map(|(p, q)| p + (q * sign - p) * t as f32).collect();
+    let n = v.iter().map(|c| c * c).sum::<f32>().sqrt();
+    if n > 1e-6 {
+        v.iter_mut().for_each(|c| *c /= n);
+    } else {
+        v = y.clone();
+    }
+    Value::Vec(v)
+}
+
 fn lerp_value(a: &Value, b: &Value, t: f64) -> Value {
     match (a, b) {
         (Value::Float(x), Value::Float(y)) => Value::Float(x + (y - x) * t),
@@ -436,7 +453,7 @@ fn lerp_value(a: &Value, b: &Value, t: f64) -> Value {
             Value::Vec(x.iter().zip(y).map(|(p, q)| p + (q - p) * t as f32).collect())
         }
         (Value::Struct(x), Value::Struct(y)) if x.len() == y.len() && x.iter().zip(y).all(|(p, q)| p.0 == q.0) => {
-            Value::Struct(x.iter().zip(y).map(|(p, q)| (p.0.clone(), lerp_value(&p.1, &q.1, t))).collect())
+            Value::Struct(x.iter().zip(y).map(|(p, q)| (p.0.clone(), if p.0 == "rotation" { nlerp_quat(&p.1, &q.1, t) } else { lerp_value(&p.1, &q.1, t) })).collect())
         }
         // Discrete values switch at the later snapshot.
         _ => if t >= 1.0 { b.clone() } else { a.clone() },
@@ -500,6 +517,25 @@ impl JitterBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encode_str_cuts_at_a_char_boundary() {
+        let s = format!("a{}", "é".repeat(40000)); // byte 65535 falls inside a character
+        let mut b = Vec::new();
+        encode_str(&mut b, &s);
+        assert!(b.len() <= 2 + u16::MAX as usize);
+    }
+
+    #[test]
+    fn rotation_interpolates_the_short_way_and_stays_unit_length() {
+        let q = |v: Vec<f32>| Value::Struct(vec![("rotation".into(), Value::Vec(v))]);
+        // The same rotation as q and -q: halfway must not collapse to zero.
+        let mid = lerp_value(&q(vec![0.0, 0.0, 0.0, 1.0]), &q(vec![0.0, 0.0, 0.0, -1.0]), 0.5);
+        let Value::Struct(f) = mid else { panic!() };
+        let Value::Vec(v) = &f[0].1 else { panic!() };
+        let n: f32 = v.iter().map(|c| c * c).sum::<f32>().sqrt();
+        assert!((n - 1.0).abs() < 1e-5 && v.iter().all(|c| c.is_finite()));
+    }
 
     fn pos(x: f32) -> Value {
         Value::Struct(vec![("pos".into(), Value::Vec(vec![x, 0.0, 0.0])), ("hp".into(), Value::Int(10))])

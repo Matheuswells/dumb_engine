@@ -3,6 +3,9 @@ use crate::Datagram;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 
+/// How many reliable ids past the next expected one are buffered.
+const REL_WINDOW: u16 = 1024;
+
 /// Delivery guarantee of a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Channel {
@@ -118,7 +121,9 @@ impl Link {
                 0 => {
                     self.need_ack = true;
                     // Only ids at or after the cursor are new; older ones are duplicates.
-                    if id == self.expect_rel || newer(id, self.expect_rel) {
+                    // Ids far ahead of the cursor are refused so a peer can't make us buffer
+                    // without bound; a sender's honest window is far smaller.
+                    if id.wrapping_sub(self.expect_rel) < REL_WINDOW {
                         self.rel_buf.entry(id).or_insert_with(|| data.to_vec());
                     }
                 }

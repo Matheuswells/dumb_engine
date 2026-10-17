@@ -38,6 +38,16 @@ const MAX_PAYLOAD_NODES: usize = 4096;
 /// Snapshot of one entity: component type name → reflected value.
 fn capture(world: &World, e: Entity) -> BTreeMap<String, Value> {
     let only: Vec<String> = world.get::<Replicated>(e).map(|r| r.only.clone()).unwrap_or_default();
+    capture_with(world, e, &only)
+}
+
+/// Every component, ignoring `Replicated.only`: what the world save keeps, including the
+/// server-only data that never goes on the wire.
+fn capture_all(world: &World, e: Entity) -> BTreeMap<String, Value> {
+    capture_with(world, e, &[])
+}
+
+fn capture_with(world: &World, e: Entity, only: &[String]) -> BTreeMap<String, Value> {
     let mut out = BTreeMap::new();
     for id in world.components_of(e) {
         let Some(desc) = world.descriptor(id) else { continue };
@@ -163,6 +173,8 @@ pub struct ServerNet<S: Datagram> {
     now: f64,
     validator: Option<Box<dyn Fn(&ClientCommand) -> bool>>,
     tick: u32,
+    /// `CommandRejected` events raised per connection this tick (capped).
+    rejected: HashMap<ConnectionId, usize>,
 }
 
 impl<S: Datagram> ServerNet<S> {
@@ -180,6 +192,7 @@ impl<S: Datagram> ServerNet<S> {
             members: HashSet::new(),
             pending: Vec::new(),
             now: 0.0,
+            rejected: HashMap::new(),
             validator: None,
             tick: 0,
         }
@@ -249,6 +262,7 @@ impl<S: Datagram> ServerNet<S> {
     /// Start of a tick: poll the network and raise events.
     pub fn pre_tick(&mut self, world: &mut World, now: f64) {
         self.gate.new_tick();
+        self.rejected.clear();
         self.now = now;
         let mut events = std::mem::take(&mut self.pending);
         events.extend(self.server.update(now));
@@ -285,7 +299,7 @@ impl<S: Datagram> ServerNet<S> {
             return;
         }
         let (Some(seq), Some(msg)) = (r.u32(), decode_message(&mut r)) else {
-            world.send_event(CommandRejected { from: from.0, name: String::new(), reason: "malformed".into() });
+            self.reject(world, from, String::new(), "malformed");
             return;
         };
         let cmd = ClientCommand { from: from.0, seq, message: msg };
@@ -300,8 +314,18 @@ impl<S: Datagram> ServerNet<S> {
                     Reject::Invalid => "invalid",
                     Reject::Stale => "stale",
                 };
-                world.send_event(CommandRejected { from: from.0, name: cmd.message.name, reason: reason.into() });
+                self.reject(world, from, cmd.message.name, reason);
             }
+        }
+    }
+
+    /// Tells scripts about a refused command, at most `max_commands_per_tick` times per
+    /// connection and tick so a flood of bad commands can't flood the event queue.
+    fn reject(&mut self, world: &mut World, from: ConnectionId, name: String, reason: &str) {
+        let n = self.rejected.entry(from).or_insert(0);
+        if *n < self.cfg.max_commands_per_tick.max(1) as usize {
+            *n += 1;
+            world.send_event(CommandRejected { from: from.0, name, reason: reason.into() });
         }
     }
 
@@ -408,9 +432,9 @@ impl<S: Datagram> ServerNet<S> {
             }
         }
 
-        if let Some(path) = self.cfg.save_path.clone() {
+        if self.cfg.save_path.is_some() {
             if self.cfg.save_every > 0 && self.tick as u64 % self.cfg.save_every == 0 {
-                self.save(&current, &path);
+                self.save_now(world);
             }
         }
         // Send now rather than at the start of the next tick; replies are handled then.
@@ -429,7 +453,7 @@ impl<S: Datagram> ServerNet<S> {
         let Some(path) = &self.cfg.save_path else { return };
         let mut state = Snapshot::new();
         for (e, _) in world.query_ref::<(Entity, &Replicated)>() {
-            state.insert(e.to_bits(), capture(world, e));
+            state.insert(e.to_bits(), capture_all(world, e));
         }
         self.save(&state, path);
     }
@@ -457,6 +481,8 @@ pub struct ClientNet<S: Datagram> {
     /// While set (a time), a failed attempt to resume a timed-out session is retried until then.
     resume_until: f64,
     grace: f64,
+    /// (acked command sequence, tick) of the newest delta, raised as a `NetReconcile` by `update`.
+    reconcile: Option<(u32, u32)>,
 }
 
 impl<S: Datagram> ClientNet<S> {
@@ -481,6 +507,7 @@ impl<S: Datagram> ClientNet<S> {
             last_push: None,
             resume_until: f64::NEG_INFINITY,
             grace: cfg.reconnect_grace,
+            reconcile: None,
         }
     }
 
@@ -562,6 +589,17 @@ impl<S: Datagram> ClientNet<S> {
                 NetEvent::Message { data, .. } => self.on_message(world, now, &data),
             }
         }
+        if let Some((acked, tick)) = self.reconcile.take() {
+            // The owned entity's authoritative state, for reconciliation.
+            let me = world.resource::<NetSession>().map_or(0, |s| s.connection);
+            for (sid, comps) in &self.latest {
+                if me != 0 && owner_of(comps) == me {
+                    if let (Some(t), Some(local)) = (comps.get(Transform::TYPE_NAME), self.map.local(*sid)) {
+                        world.send_event(NetReconcile { entity: local, acked_seq: acked, tick, transform: t.clone() });
+                    }
+                }
+            }
+        }
         self.apply_interpolated(world, now);
     }
 
@@ -581,6 +619,7 @@ impl<S: Datagram> ClientNet<S> {
         self.offset = None;
         self.last_push = None;
         self.acked_seq = 0;
+        self.reconcile = None;
     }
 
     fn server_id(&self, local: u64) -> Option<NetId> {
@@ -613,15 +652,8 @@ impl<S: Datagram> ClientNet<S> {
                 if let Some(s) = world.resource_mut::<NetSession>() {
                     s.tick = delta.tick;
                 }
-                // The owned entity's authoritative state, for reconciliation.
-                let me = world.resource::<NetSession>().map_or(0, |s| s.connection);
-                for (sid, comps) in &self.latest {
-                    if me != 0 && owner_of(comps) == me {
-                        if let (Some(t), Some(local)) = (comps.get(Transform::TYPE_NAME), self.map.local(*sid)) {
-                            world.send_event(NetReconcile { entity: local, acked_seq: acked, tick: delta.tick, transform: t.clone() });
-                        }
-                    }
-                }
+                // Reconciled once per update, after every part of a split delta has arrived.
+                self.reconcile = Some((acked, delta.tick));
             }
             Some(MSG_SERVER_MESSAGE) => {
                 if let Some(mut m) = decode_message(&mut r) {
@@ -876,6 +908,23 @@ mod tests {
         let (t, rep) = w.query_ref::<(&Transform, &Replicated)>().next().map(|(t, r)| (t.translation.x, r.owner)).unwrap();
         assert_eq!((t, rep), (42.0, 0));
         assert!(s.tick() > 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn save_keeps_components_that_are_not_replicated() {
+        let dir = std::env::temp_dir().join(format!("dumb_rt_only_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = ServerConfig { save_path: Some(dir.join("world.sav")), save_every: 5, ..Default::default() };
+        let mut r = Rig::new(cfg.clone());
+        let e = r.replicated_at(1.0, 0);
+        r.sw.insert(e, dumb_ecs::Name::new("secret"));
+        r.sw.insert(e, Replicated { owner: 0, only: vec!["Transform".into()] });
+        r.run(0.5);
+        let mut w = World::new();
+        let mut s = ServerNet::new(MemNet::default().socket("10.0.0.1:1".parse().unwrap()), cfg, &mut w);
+        assert_eq!(s.restore(&mut w), 1);
+        assert!(w.query_ref::<&dumb_ecs::Name>().any(|n| n.name == "secret"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

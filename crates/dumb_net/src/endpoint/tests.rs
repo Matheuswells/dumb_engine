@@ -234,3 +234,17 @@ fn expired_session_is_reported_and_ids_are_not_sequential() {
     r2.run(0.5);
     assert_ne!(r2.client.id().unwrap(), id);
 }
+
+#[test]
+fn reliable_ids_far_ahead_are_not_buffered() {
+    let mut l = Link::new(0.0);
+    let mut body = vec![0u8, 0];
+    for id in [5u16, 3000, 40000] {
+        body.push(0);
+        body.extend_from_slice(&id.to_le_bytes());
+        body.extend_from_slice(&1u16.to_le_bytes());
+        body.push(7);
+    }
+    assert!(l.receive(&body, 0.0).is_empty());
+    assert_eq!(l.rel_buf.len(), 1, "only the id inside the window is held");
+}
