@@ -140,6 +140,8 @@ struct Conn {
     sent: Snapshot,
     last_tick: u32,
     viewer: Vec3,
+    /// Timed out and waiting for a reconnect: nothing is sent and it doesn't count as a viewer.
+    lingering: bool,
 }
 
 /// The authoritative side.
@@ -250,13 +252,18 @@ impl<S: Datagram> ServerNet<S> {
             match ev {
                 NetEvent::Connected(id) | NetEvent::Reconnected(id) => {
                     let reconnected = matches!(ev, NetEvent::Reconnected(_));
-                    self.conns.entry(id).or_insert_with(|| Conn { interest: Interest::new(), sent: Snapshot::new(), last_tick: 0, viewer: Vec3::ZERO });
+                    let c = self.conns.entry(id).or_insert_with(|| Conn { interest: Interest::new(), sent: Snapshot::new(), last_tick: 0, viewer: Vec3::ZERO, lingering: false });
+                    c.lingering = false;
                     world.send_event(NetConnected { connection: id.0, reconnected });
                 }
                 NetEvent::Disconnected { id, timed_out } => {
                     // A timed-out session can still resume within the grace period: keep its
                     // state, drop it only on an explicit disconnect.
-                    if !timed_out {
+                    if timed_out {
+                        if let Some(c) = self.conns.get_mut(&id) {
+                            c.lingering = true;
+                        }
+                    } else {
                         self.conns.remove(&id);
                         self.gate.drop_connection(id);
                     }
@@ -336,7 +343,7 @@ impl<S: Datagram> ServerNet<S> {
 
         // The streaming / AI focus follows the connected players.
         let mut points: Vec<Vec3> = Vec::new();
-        for (id, c) in &mut self.conns {
+        for (id, c) in self.conns.iter_mut().filter(|(_, c)| !c.lingering) {
             if let Some(p) = viewers.get(id) {
                 c.viewer = *p;
             }
@@ -347,7 +354,7 @@ impl<S: Datagram> ServerNet<S> {
         }
 
         // One delta per connection, against what it was last sent.
-        let ids: Vec<ConnectionId> = self.conns.keys().copied().collect();
+        let ids: Vec<ConnectionId> = self.conns.iter().filter(|(_, c)| !c.lingering).map(|(id, _)| *id).collect();
         for id in ids {
             let c = self.conns.get_mut(&id).unwrap();
             let cost = |k: NetId| 24 + current.get(&k).map_or(0, |m| m.len() * 40);
@@ -378,7 +385,7 @@ impl<S: Datagram> ServerNet<S> {
         for m in out {
             let b = encode_message(MSG_SERVER_MESSAGE, &[], &m.message);
             let ch = if m.reliable { Channel::ReliableOrdered } else { Channel::Unreliable };
-            let targets: Vec<ConnectionId> = if m.to == 0 { self.conns.keys().copied().collect() } else { vec![ConnectionId(m.to)] };
+            let targets: Vec<ConnectionId> = if m.to == 0 { self.conns.iter().filter(|(_, c)| !c.lingering).map(|(id, _)| *id).collect() } else { vec![ConnectionId(m.to)] };
             for t in targets {
                 self.server.send(t, ch, &b);
             }
