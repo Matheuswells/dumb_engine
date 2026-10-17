@@ -1,16 +1,24 @@
-//! Game runtime shared by the editor's play mode and the standalone player.
+//! Game runtime shared by the editor's play mode, the standalone player and the headless
+//! server. The `render` feature (on by default) adds everything that needs a window or a GPU:
+//! input mapping from winit, the HUD and web views, the performance overlay. Without it the
+//! simulation, physics, scripts and asset loading build alone (`dumb-server`).
 
 use dumb_asset::AssetDatabase;
-use dumb_core::{Input, Key, MouseButton, Time};
-use dumb_ecs::{Animator, MeshRenderer, World};
+use dumb_core::{Input, Time};
+#[cfg(feature = "render")]
+use dumb_core::{Key, MouseButton};
+use dumb_ecs::{Animator, MeshRenderer, StreamFocus, World};
 use dumb_script::{ScriptContext, ScriptHost};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub mod export;
+#[cfg(feature = "render")]
 pub mod hud_view;
+pub mod net;
 pub mod perf;
 pub mod streaming;
+#[cfg(feature = "render")]
 pub mod web;
 
 /// `project.ron` at the project root.
@@ -34,6 +42,16 @@ pub struct ProjectSettings {
     /// Most physics steps per frame (prevents slow-motion spirals after hitches).
     #[serde(default = "default_physics_steps")]
     pub physics_max_steps: u32,
+    /// Simulation ticks per second, independent of the frame rate; 0 = one tick per frame.
+    #[serde(default)]
+    pub sim_hz: u32,
+    /// Most simulation ticks per frame when `sim_hz` is set (a hitch drops the rest).
+    #[serde(default = "default_sim_steps")]
+    pub sim_max_steps: u32,
+    /// Replayable simulation: fixed `1/sim_hz` tick (60 Hz if `sim_hz` is 0), `Time` derived
+    /// from the tick counter, `time_scale` ignored.
+    #[serde(default)]
+    pub deterministic: bool,
     /// Frame cap for the game; 0 = unlimited.
     #[serde(default)]
     pub max_fps: u32,
@@ -82,6 +100,10 @@ fn default_physics_hz() -> u32 {
     60
 }
 
+fn default_sim_steps() -> u32 {
+    5
+}
+
 fn default_physics_steps() -> u32 {
     4
 }
@@ -116,6 +138,9 @@ impl Default for ProjectSettings {
             gravity: default_gravity(),
             physics_hz: default_physics_hz(),
             physics_max_steps: default_physics_steps(),
+            sim_hz: 0,
+            sim_max_steps: default_sim_steps(),
+            deterministic: false,
             max_fps: 0,
             vsync: true,
             window_size: default_window(),
@@ -221,6 +246,26 @@ pub fn strip_unc(p: &Path) -> PathBuf {
     PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(&s).to_string())
 }
 
+/// Spawn a scene asset (path relative to `Assets/`) into `world`. Logs why when it can't.
+pub fn load_scene(db: &AssetDatabase, world: &mut World, scene: &str) -> bool {
+    match db.id_for_path(scene).and_then(|id| db.read_asset_text(id)) {
+        Some(text) => match dumb_ecs::SceneData::from_ron(&text) {
+            Ok(s) => {
+                s.instantiate(world);
+                true
+            }
+            Err(e) => {
+                log::error!("scene parse error: {e}");
+                false
+            }
+        },
+        None => {
+            log::error!("scene `{scene}` not found");
+            false
+        }
+    }
+}
+
 /// Advance `Animator` time and wrap/clamp by clip length.
 pub fn update_animators(world: &mut World, db: &AssetDatabase, dt: f32) {
     for (anim, mr) in world.query::<(&mut Animator, &MeshRenderer)>() {
@@ -240,16 +285,35 @@ pub fn update_animators(world: &mut World, db: &AssetDatabase, dt: f32) {
     }
 }
 
-/// One simulation step: scripts, animation, transform propagation.
-/// One simulation step: scripts, physics, animation, transform propagation.
-/// Scripts see the collision events and query state of the previous physics step.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SimStats {
     pub ai: dumb_ecs::AiStats,
     pub stream: streaming::StreamStats,
+    /// Ticks `simulate_frame` ran this frame (0 on a fast frame with a fixed tick rate).
+    pub ticks: u32,
+}
+
+/// Where streaming and AI distance LOD center this frame: the `StreamFocus` resource's points
+/// when it has any (a server's players), otherwise the primary camera.
+pub fn focus_points(world: &World) -> Vec<dumb_core::Vec3> {
+    match world.resource::<StreamFocus>() {
+        Some(f) if !f.points.is_empty() => f.points.clone(),
+        _ => dumb_ecs::find_primary_camera(world).map(|c| world.global_matrix(c).w_axis.truncate()).into_iter().collect(),
+    }
+}
+
+/// Start loading the models the simulation reads (mesh colliders, animation clip lengths).
+/// The renderer does this for whatever it draws; a headless server calls it every tick.
+pub fn request_sim_assets(world: &World, db: &mut AssetDatabase) {
+    for mr in world.query_ref::<&MeshRenderer>() {
+        if !mr.model.is_none() {
+            db.model(mr.model);
+        }
+    }
 }
 
 /// One simulation frame: world streaming, AI scheduling, scripts, physics, animation.
+/// Scripts see the collision events and query state of the previous physics step.
 /// Scripts' mesh changes land in `meshes`: apply them with `AssetDatabase::apply_mesh_uploads`.
 #[allow(clippy::too_many_arguments)]
 pub fn simulate(
@@ -267,18 +331,18 @@ pub fn simulate(
     world.update_transforms();
     hud.begin_frame();
     dumb_ecs::hud::apply_button_clicks(world, &hud.clicked);
-    let focus = dumb_render::find_primary_camera(world).map(|c| world.global_matrix(c).w_axis.truncate());
+    let focus = focus_points(world);
     let mut stats = SimStats::default();
     if let Some(s) = streamer {
         let budget = std::time::Duration::from_secs_f32(settings.stream_budget_ms.max(0.1) / 1000.0);
         dumb_core::profile_scope!("streaming");
-        stats.stream = s.update(world, db, focus, budget);
+        stats.stream = s.update(world, db, &focus, budget);
         world.update_transforms();
     }
     // Decide which NPCs think this frame, before scripts run.
     stats.ai = {
         dumb_core::profile_scope!("ai orchestrator");
-        dumb_ecs::ai::orchestrate(world, time.delta, focus, &settings.ai)
+        dumb_ecs::ai::orchestrate(world, time.delta, &focus, &settings.ai)
     };
     let lookup = |p: &str| db.id_for_path(p);
     let no_physics = dumb_core::physics::NoPhysics;
@@ -311,7 +375,76 @@ pub fn simulate(
     stats
 }
 
+/// The fixed-step clock the settings ask for, if any (`None` = one tick per frame).
+pub fn clock_for(settings: &ProjectSettings) -> Option<dumb_core::FixedClock> {
+    if settings.sim_hz == 0 && !settings.deterministic {
+        return None;
+    }
+    let hz = if settings.sim_hz == 0 { 60 } else { settings.sim_hz.clamp(1, 1000) };
+    Some(dumb_core::FixedClock::new(hz, settings.sim_max_steps, settings.deterministic))
+}
+
+/// Advance the clock by one rendered frame (`raw_dt` wall-clock seconds) and run the matching
+/// simulation ticks: one per frame without `sim_hz`, otherwise a whole number of fixed ticks
+/// (possibly none) separate from the frame rate. `time` is what scripts see for the last tick.
+/// Per-frame input edges are consumed by the first tick; the caller calls `end_frame` only when
+/// `SimStats::ticks > 0`, so a frame with no tick keeps its edges for the next one.
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_frame(
+    clock: &mut Option<dumb_core::FixedClock>,
+    time: &mut Time,
+    raw_dt: f32,
+    world: &mut World,
+    scripts: &mut ScriptHost,
+    db: &AssetDatabase,
+    input: &mut Input,
+    mut physics: Option<&mut dumb_physics::Physics>,
+    mut streamer: Option<&mut streaming::Streamer>,
+    settings: &ProjectSettings,
+    hud: &mut dumb_ecs::Hud,
+    meshes: &mut dumb_ecs::MeshUploads,
+    mut after_tick: Option<&mut dyn FnMut(&mut World)>,
+) -> SimStats {
+    // Rebuild the clock when the settings changed (the editor edits them live).
+    let want = clock_for(settings);
+    let same = match (&*clock, &want) {
+        (Some(a), Some(b)) => a.hz == b.hz && a.max_steps == b.max_steps && a.deterministic == b.deterministic,
+        (None, None) => true,
+        _ => false,
+    };
+    if !same {
+        *clock = want;
+        if let Some(c) = clock.as_mut() {
+            c.resume(time);
+        }
+    }
+    let Some(c) = clock.as_mut() else {
+        time.advance(raw_dt);
+        let mut stats = simulate(world, scripts, db, time, input, physics, streamer, settings, hud, meshes);
+        stats.ticks = 1;
+        if let Some(f) = after_tick.as_deref_mut() {
+            f(world);
+        }
+        return stats;
+    };
+    let mut stats = SimStats::default();
+    let n = c.accumulate(raw_dt);
+    for i in 0..n {
+        if i > 0 {
+            input.end_frame();
+        }
+        *time = c.next_tick(time.time_scale);
+        stats = simulate(world, scripts, db, time, input, physics.as_deref_mut(), streamer.as_deref_mut(), settings, hud, meshes);
+        if let Some(f) = after_tick.as_deref_mut() {
+            f(world);
+        }
+    }
+    stats.ticks = n;
+    stats
+}
+
 /// Map winit physical keys to engine keys.
+#[cfg(feature = "render")]
 pub fn map_key(code: winit::keyboard::KeyCode) -> Option<Key> {
     use winit::keyboard::KeyCode as K;
     Some(match code {
@@ -383,6 +516,7 @@ pub fn map_key(code: winit::keyboard::KeyCode) -> Option<Key> {
     })
 }
 
+#[cfg(feature = "render")]
 pub fn map_mouse(b: winit::event::MouseButton) -> Option<MouseButton> {
     match b {
         winit::event::MouseButton::Left => Some(MouseButton::Left),
@@ -393,6 +527,7 @@ pub fn map_mouse(b: winit::event::MouseButton) -> Option<MouseButton> {
 }
 
 /// Feed a winit window event into an `Input` snapshot.
+#[cfg(feature = "render")]
 pub fn feed_input(input: &mut Input, event: &winit::event::WindowEvent) {
     use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
     use winit::keyboard::PhysicalKey;
@@ -429,11 +564,13 @@ pub fn feed_input(input: &mut Input, event: &winit::event::WindowEvent) {
 /// button (`Hud::pointer_over_ui`) isn't given to the game, nor is the drag that follows, until
 /// the button is released. The wheel still reaches scripts, which check `pointer_over_ui` to
 /// scroll their UI instead.
+#[cfg(feature = "render")]
 #[derive(Default)]
 pub struct HudInputFilter {
     held: bool,
 }
 
+#[cfg(feature = "render")]
 impl HudInputFilter {
     /// Feed `event` to `input` unless it belongs to a press on the HUD.
     pub fn feed(&mut self, input: &mut Input, event: &winit::event::WindowEvent, pointer_over_ui: bool) {
@@ -604,6 +741,7 @@ mod limiter_tests {
     }
 }
 
+#[cfg(feature = "render")]
 #[cfg(test)]
 mod hud_input_tests {
     use super::HudInputFilter;

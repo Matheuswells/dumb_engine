@@ -6,7 +6,7 @@
                          │ assets · model/anim/material viewers     │
                          └───────┬───────────────┬──────────────────┘
                                  │               │
-  Scripts/*.dll (cdylib) ► dumb_script       dumb_runtime ──► dumb-player
+  Scripts/*.dll (cdylib) ► dumb_script       dumb_runtime ──► dumb-player · dumb-server
         (cdylib)          ScriptHost        simulate(), Project
                                  │               │
              ┌───────────────────┼───────────────┼──────────────┐
@@ -122,6 +122,19 @@ Undo is disabled during play, because Stop restores the pre-play snapshot anyway
 
 MCP tool calls ([MCP.md](MCP.md)) arrive on HTTP worker threads and run on the main thread
 before `pre_frame`, through the same actions the UI uses.
+
+## Headless server
+
+`dumb_runtime`'s `render` feature (on by default) holds everything that needs a window or a
+GPU: `dumb_render`, winit input mapping, egui, the HUD and web views (wry) and the performance
+overlay. `simulate()`, physics, scripts, streaming and the asset database don't depend on it, so
+`--no-default-features` builds `dumb-server`, which runs them in a fixed-rate loop with no
+window. The renderer is what normally starts model loads (`AssetDatabase::model`), so the server
+calls `request_sim_assets` every tick to load the models colliders and animators read, as data.
+
+Streaming and AI distance LOD take a list of focus points (`focus_points`): the `StreamFocus`
+resource's points if it has any, otherwise the primary camera. Distances are to the nearest
+point, so one server keeps the world live around every player.
 
 ## Performance notes (MVP state)
 

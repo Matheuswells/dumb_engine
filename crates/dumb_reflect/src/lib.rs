@@ -200,11 +200,14 @@ pub fn apply(r: &mut dyn Reflect, v: &Value) {
                 *t = n as u32
             }
         }
+        (ReflectMut::I64(t), Value::Int(n)) => *t = *n,
         (ReflectMut::I64(t), v) => {
             if let Some(n) = v.as_f64() {
                 *t = n as i64
             }
         }
+        // 64-bit ids (session ids) are stored as the same bits in an i64: don't go through f64.
+        (ReflectMut::U64(t), Value::Int(n)) => *t = *n as u64,
         (ReflectMut::U64(t), v) => {
             if let Some(n) = v.as_f64() {
                 *t = n as u64

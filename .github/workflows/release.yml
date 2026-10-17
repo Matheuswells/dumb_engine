@@ -61,7 +61,10 @@ jobs:
         run: cargo test --workspace --release
 
       - name: Build
-        run: cargo build --release --bin dumb-editor --bin dumb-player
+        run: |
+          cargo build --release --bin dumb-editor --bin dumb-player
+          # On its own, so it doesn't link the renderer, winit or the web view.
+          cargo build --release -p dumb_runtime --no-default-features --bin dumb-server
 
       - name: Package
         run: bash tools/package-release.sh "$TAG" "${{ matrix.platform }}"

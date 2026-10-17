@@ -45,6 +45,17 @@ Standalone player (no editor):
 cargo run -p dumb_runtime --bin dumb-player -- project
 ```
 
+Headless server (no window, GPU, egui or web view; runs on a Linux box without a desktop):
+
+```bash
+cargo run -p dumb_runtime --no-default-features --bin dumb-server -- project [scene] [--hz 30] [--ticks N]
+```
+
+It runs the scripts, physics, AI and world streaming at a fixed tick rate and logs its tick
+times every 10 s. Streaming and AI LOD follow the `StreamFocus` resource (one point per player)
+or, without one, a camera in the scene. Ctrl+C or SIGTERM stops it cleanly. Networking comes
+next, see [docs/ROADMAP.md](docs/ROADMAP.md) section 3.1.
+
 Requirements: a Vulkan 1.3 GPU and driver, and a Rust toolchain. You do **not** need the
 Vulkan SDK: shaders are WGSL, compiled to SPIR-V at build time by naga. Blender is optional.
 It is found automatically (Steam or Program Files installs, `PATH`, or `DUMB_BLENDER`) and
@@ -215,7 +226,7 @@ files the bundle doesn't ship are kept. The replaced files are saved in `.update
 until the next update. After the restart, press **Build scripts** once, because game scripts must
 be rebuilt against the new engine. A source checkout updates with `git pull` instead.
 
-A bundle contains `dumb-editor`, `dumb-player`, the sample project and the engine sources,
+A bundle contains `dumb-editor`, `dumb-player`, `dumb-server`, the sample project and the engine sources,
 because game scripts compile against them. It also has a `rust-toolchain.toml` that pins the
 compiler the editor was built with, and the editor builds scripts with that compiler (rustup
 installs it on first use).
@@ -231,7 +242,8 @@ crates/
   dumb_asset    asset database, .meta, glTF + Blender importers, materials, primitives, watcher
   dumb_render   Vulkan 1.3 renderer (ash), PBR + skinning, egui backend, offscreen views
   dumb_script   plugin ABI, ScriptHost (load / hot reload / cargo build)
-  dumb_runtime  game loop pieces, project settings, standalone player
+  dumb_runtime  game loop pieces, project settings, standalone player, headless server
+                (`render` feature: everything that needs a window or GPU)
   dumb_editor   the editor (and its MCP server for AI agents)
 project/Scripts         the demo project's scripts crate (one file per script)
 project/                sample project (Assets/, project.ron)

@@ -272,6 +272,18 @@ impl Default for InkOutline {
     }
 }
 
+/// First camera marked primary (or any camera).
+pub fn find_primary_camera(world: &World) -> Option<Entity> {
+    let mut any = None;
+    for (e, c) in world.query_ref::<(Entity, &Camera)>() {
+        if c.primary {
+            return Some(e);
+        }
+        any.get_or_insert(e);
+    }
+    any
+}
+
 pub(crate) fn register_builtin(w: &mut World) {
     w.register_type::<InkOutline>();
     w.register_type::<Name>();
@@ -283,7 +295,10 @@ pub(crate) fn register_builtin(w: &mut World) {
     w.register_type::<Animator>();
     w.register_type::<PrefabInstance>();
     w.register_type::<crate::ai::AiAgent>();
+    w.register_type::<crate::net::Replicated>();
+    w.register_type::<crate::net::NetSession>();
     w.register_type::<crate::streaming::StreamingCell>();
+    w.register_type::<crate::streaming::StreamFocus>();
     w.register_type::<crate::hud::UiText>();
     w.register_type::<crate::hud::UiBar>();
     w.register_type::<crate::hud::UiImage>();

@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Server
+- **Headless server**: `dumb-server [project] [scene] [--hz N] [--ticks N]` runs a project's
+  scripts, physics, AI and world streaming with no window or GPU, at a fixed tick rate (30 Hz by
+  default), logging tick times every 10 s. Ctrl+C and SIGTERM stop it cleanly (scripts get
+  their `on_unload`). Build it with `cargo build -p dumb_runtime --no-default-features --bin
+  dumb-server`: without the new `render` feature, `dumb_runtime` doesn't pull in the renderer,
+  winit, egui or the web view, so it builds and runs on machines without a desktop.
+- **`StreamFocus` resource**: points that world streaming and AI distance LOD follow instead of
+  the primary camera. With several points the nearest one counts, so a server can keep the world
+  loaded around every player. `Streamer::update` and `ai::orchestrate` take a slice of points.
+- `find_primary_camera` moved to `dumb_ecs` (`dumb_render` re-exports it).
+
+- Multiplayer robustness: deltas over one datagram are split into several reliable messages,
+  unchanged entities no longer use up the bandwidth budget, command acks wait until scripts have
+  applied the command, client commands are queued once per tick (`simulate_frame` takes an
+  `after_tick` hook, `ClientNet::queue_commands`), session ids are unguessable, sessions that
+  outlive the reconnect grace report a final `NetDisconnected { timed_out: false }`, and a client
+  given a fresh session clears the world it had received.
+- **Multiplayer runtime**: `dumb-server --listen ADDR [--save FILE] [--save-every TICKS]` accepts
+  clients over UDP (`dumb_net`) and replicates every entity with a `Replicated` component as
+  delta snapshots limited to each client's area of interest and bandwidth budget;
+  `dumb-player --connect ADDR` joins. Scripts get `world.is_server()` / `is_client()`, the events
+  `NetConnected`, `NetDisconnected`, `ClientCommand`, `CommandRejected`, `ServerMessage`,
+  `NetReconcile`, and send typed messages with `NetSend`. Commands from clients are validated
+  (ownership, rate, order, payload). The world save/restore keeps a persistent world across
+  restarts.
+
+### Simulation
+- **Fixed-timestep loop.** New project settings `sim_hz` / `sim_max_steps` run the simulation
+  (scripts, AI, streaming, animation) at a fixed tick rate independent of the frame rate;
+  `sim_hz = 0` keeps one tick per frame. `deterministic` makes every tick exactly `1/hz` and
+  derives `Time` from the tick counter, ignoring `time_scale`. In the editor and the player;
+  Project Preferences ▸ Game tick rate.
+
 ## v0.3.3
 
 Scripts must be rebuilt (ABI abi-10); the editor does it on its own.

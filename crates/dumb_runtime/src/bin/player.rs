@@ -6,9 +6,9 @@
 
 use dumb_asset::AssetDatabase;
 use dumb_core::{Input, Time};
-use dumb_ecs::{SceneData, World};
+use dumb_ecs::World;
 use dumb_render::{camera_ink, camera_view, extract_world, find_primary_camera, world_skybox, EguiFrame, ExtractOptions, RenderTargetId, RenderView, Renderer};
-use dumb_runtime::{simulate, Project};
+use dumb_runtime::{simulate_frame, Project};
 use dumb_script::ScriptHost;
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,6 +27,7 @@ struct Game {
     world: World,
     scripts: ScriptHost,
     time: Time,
+    clock: Option<dumb_core::FixedClock>,
     input: Input,
     physics: dumb_physics::Physics,
     streamer: dumb_runtime::streaming::Streamer,
@@ -43,10 +44,14 @@ struct Game {
     hud_input: dumb_runtime::HudInputFilter,
     hud_view: dumb_runtime::hud_view::HudView,
     web: dumb_runtime::web::WebLayer,
+    /// Connection to a `dumb-server` (`--connect ADDR`).
+    net: Option<dumb_runtime::net::ClientNet<std::net::UdpSocket>>,
+    started: Instant,
 }
 
 struct App {
     project: Project,
+    connect: Option<std::net::SocketAddr>,
     scene: Option<String>,
     game: Option<Game>,
 }
@@ -82,16 +87,13 @@ impl ApplicationHandler for App {
             log::warn!("scripts: {e}");
         }
         let scene = self.scene.clone().unwrap_or(self.project.settings.startup_scene.clone());
-        match db.id_for_path(&scene).and_then(|id| db.read_asset_text(id)) {
-            Some(text) => match SceneData::from_ron(&text) {
-                Ok(s) => {
-                    s.instantiate(&mut world);
-                }
-                Err(e) => log::error!("scene parse error: {e}"),
-            },
-            None => log::error!("scene `{scene}` not found"),
-        }
+        dumb_runtime::load_scene(&db, &mut world, &scene);
         db.update();
+        let net = self.connect.and_then(|addr| {
+            let socket = dumb_net::bind_udp(if addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" }).map_err(|e| log::error!("network socket: {e}")).ok()?;
+            log::info!("connecting to {addr}");
+            Some(dumb_runtime::net::ClientNet::new(socket, addr, Default::default(), 0.1, &mut world, 0.0))
+        });
         let target = renderer.create_target(size.width.max(1), size.height.max(1));
         self.game = Some(Game {
             window,
@@ -102,6 +104,7 @@ impl ApplicationHandler for App {
             world,
             scripts,
             time: Time::new(),
+            clock: None,
             input: Input::default(),
             physics: {
                 let mut p = dumb_physics::Physics::new(dumb_core::Vec3::from(self.project.settings.gravity));
@@ -126,6 +129,8 @@ impl ApplicationHandler for App {
             hud_input: Default::default(),
             hud_view: Default::default(),
             web: dumb_runtime::web::WebLayer::new(&self.project.root),
+            net,
+            started: Instant::now(),
         });
     }
 
@@ -148,10 +153,19 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let dt = g.last.elapsed().as_secs_f32();
                 g.last = Instant::now();
-                g.time.advance(dt);
                 g.db.update();
                 g.scripts.update(&mut [&mut g.world]);
-                g.sim = simulate(&mut g.world, &mut g.scripts, &g.db, &g.time, &g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes);
+                // Commands the scripts raise last one tick: queue them after each tick, not each frame.
+                let mut net = g.net.as_mut();
+                let mut after_tick = |w: &mut dumb_ecs::World| {
+                    if let Some(n) = net.as_mut() {
+                        n.queue_commands(w);
+                    }
+                };
+                g.sim = simulate_frame(&mut g.clock, &mut g.time, dt, &mut g.world, &mut g.scripts, &g.db, &mut g.input, Some(&mut g.physics), Some(&mut g.streamer), &self.project.settings, &mut g.hud, &mut g.meshes, Some(&mut after_tick));
+                if let Some(n) = g.net.as_mut() {
+                    n.update(&mut g.world, g.started.elapsed().as_secs_f64());
+                }
                 g.db.apply_mesh_uploads(&mut g.meshes);
 
                 let size = g.window.inner_size();
@@ -209,7 +223,10 @@ impl ApplicationHandler for App {
                 let mut delta = out.textures_delta;
                 delta.clear();
                 drop(_render);
-                g.input.end_frame();
+                // A frame without a tick keeps its input edges for the next one.
+                if g.sim.ticks > 0 {
+                    g.input.end_frame();
+                }
                 {
                     dumb_core::profile_scope!("frame cap wait");
                     g.limiter.wait(g.max_fps);
@@ -229,7 +246,17 @@ impl ApplicationHandler for App {
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let mut args = std::env::args().skip(1);
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // `--connect ADDR`: join a dumb-server (e.g. 127.0.0.1:7777).
+    let connect = args.iter().position(|a| a == "--connect").map(|i| {
+        let addr = args.get(i + 1).cloned().unwrap_or_default();
+        args.drain(i..(i + 2).min(args.len()));
+        addr.parse::<std::net::SocketAddr>().unwrap_or_else(|_| {
+            eprintln!("--connect needs an address like 127.0.0.1:7777");
+            std::process::exit(2);
+        })
+    });
+    let mut args = args.into_iter();
     // An exported game has project.ron next to the executable.
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
     let default = match exe_dir {
@@ -240,7 +267,7 @@ fn main() {
     let scene = args.next();
     let el = EventLoop::new().expect("event loop");
     el.set_control_flow(ControlFlow::Poll);
-    let mut app = App { project, scene, game: None };
+    let mut app = App { project, connect, scene, game: None };
     el.run_app(&mut app).expect("run");
 }
 
