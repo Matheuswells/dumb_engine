@@ -20,9 +20,16 @@ simulation):
 - ✅ World streaming: `StreamingCell` entities load their scene when the camera comes within
   `load_distance` (parsed on a worker thread, spawned in time slices within a per-frame budget)
   and unload past `unload_distance`.
-- Floating origin, or 64-bit world positions with camera-relative rendering.
-- Procedural terrain: heightfield chunks generated on worker threads, with GPU tessellation
-  or clipmaps.
+- ✅ Floating origin: when the camera strays past a threshold (default 2 km, Project Preferences ▸
+  Floating origin) every root entity and every physics body is shifted back by a grid-snapped
+  amount, and the true position of the local origin is kept in `f64` in the `WorldOrigin`
+  resource (`to_world` / `to_local`). No camera-relative rendering needed: the renderer only
+  ever sees small numbers.
+- ✅ Procedural terrain: a `Terrain` component streams an endless heightfield of chunks around the
+  camera. Chunks are built on worker threads as runtime meshes, get distance LOD (resolution
+  halves per level, skirts hide the seams) and mesh colliders at full detail, are placed in true
+  world space (so they work with the floating origin), and unload with distance.
+  `Terrain::height_at` samples the ground from scripts. Next: GPU tessellation or clipmaps.
 
 ## 2.1 Massive npc ai support
 - ✅ AI orchestrator: `AiAgent` think rates with distance LOD bands (near/mid/far/asleep), a

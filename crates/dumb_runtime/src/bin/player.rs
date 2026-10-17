@@ -253,5 +253,8 @@ fn sim_lines(s: &dumb_runtime::SimStats) -> Vec<String> {
     if s.stream.cells > 0 {
         v.push(format!("streaming {}/{} cells · {} loading", s.stream.loaded, s.stream.cells, s.stream.loading));
     }
+    if s.terrain.chunks > 0 {
+        v.push(format!("terrain {} chunks · {} building", s.terrain.chunks, s.terrain.building));
+    }
     v
 }

@@ -12,21 +12,25 @@ pub mod commands;
 pub mod components;
 pub mod hud;
 pub mod meshes;
+pub mod origin;
 pub mod physics;
 mod query;
 pub mod scene;
 pub mod streaming;
+pub mod terrain;
 mod world;
 
 pub use ai::{AiAgent, AiSettings, AiStats};
 pub use commands::Commands;
 pub use hud::{Anchor, Hud, HudCmd, HudPos, UiBar, UiButton, UiImage, UiPanel, UiText, UiWeb, UiWorldLabel};
+pub use origin::{OriginSettings, WorldOrigin};
 pub use meshes::{MeshPart, MeshUploads, RuntimeMesh};
 pub use components::*;
 pub use physics::{BodyType, CharacterController, Collider, ColliderShape, RigidBody};
 pub use dumb_derive::{Component, Editor};
 pub use query::{QueryData, QueryIter, ReadOnlyQueryData, With, Without};
 pub use scene::{EntityData, SceneData};
+pub use terrain::{Terrain, TerrainChunk, TerrainStats, TerrainStreamer};
 pub use streaming::{IncrementalSpawn, StreamingCell};
 pub use world::World;
 
