@@ -65,6 +65,8 @@ server owns the simulation, clients render and send input.
   *Done so far:* the `dumb_net` crate (UDP/in-memory sockets, reliable-ordered + unreliable
   channels, session reconnect, `NetEvent`s, `Emulated` socket). Still to do: wiring the events
   into the runtime/scripts.
+  Also in `dumb_net` (not yet wired to `AiAgent`/replication): `SpatialGrid` and the
+  per-connection `Interest` set (spawn/despawn with hysteresis, distance-prioritized budget).
 - Replication: a `Replicated` component marks entities. Each tick the server diffs their
   reflected components (the same `Value` path as scenes) and sends delta snapshots with
   server→client entity id mapping (including entity references inside component values).

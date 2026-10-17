@@ -7,10 +7,12 @@
 //! loss, reordering). Authentication and cookie challenges build on top of this layer.
 
 mod emulator;
+mod interest;
 mod endpoint;
 mod socket;
 mod wire;
 
 pub use emulator::{Emulated, EmulatorConfig};
+pub use interest::{Interest, InterestUpdate, SpatialGrid};
 pub use endpoint::{Channel, Client, ClientState, ConnectionId, NetConfig, NetEvent, Server};
 pub use socket::{bind_udp, Datagram, MemNet, MemSocket};

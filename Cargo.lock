@@ -1176,6 +1176,7 @@ dependencies = [
 name = "dumb_net"
 version = "0.3.3"
 dependencies = [
+ "glam 0.30.10",
  "log",
 ]
 
