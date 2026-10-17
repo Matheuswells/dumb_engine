@@ -70,9 +70,9 @@ server owns the simulation, clients render and send input.
   and session security: keyed address-cookie challenge (no amplification), pluggable token
   authentication, per-connection packet rate limit. Replication codec in `dumb_net`: snapshot diff (field-level patches), compact binary
   encoding hardened against hostile input, server→client entity id mapping (incl. references
-  inside values), jitter-buffer interpolation, atomic world save/load. Still open: runtime
-  wiring (`Replicated` component, per-tick send, `is_server()`), prediction/reconciliation,
-  client input/RPC validation, authoritative fixed tick (needs PR #4).
+  inside values), jitter-buffer interpolation, atomic world save/load, a generic `Predictor` (prediction +
+  reconciliation) and a `CommandGate` (ownership, per-tick rate, ordering, validation). Still open: runtime
+  wiring (`Replicated` component, per-tick send, `is_server()`), authoritative fixed tick (needs PR #4).
 - Replication: a `Replicated` component marks entities. Each tick the server diffs their
   reflected components (the same `Value` path as scenes) and sends delta snapshots with
   server→client entity id mapping (including entity references inside component values).

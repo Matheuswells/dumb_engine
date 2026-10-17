@@ -7,6 +7,7 @@
 //! loss, reordering). Authentication and cookie challenges build on top of this layer.
 
 mod emulator;
+mod gameplay;
 mod interest;
 mod replication;
 mod endpoint;
@@ -14,6 +15,7 @@ mod socket;
 mod wire;
 
 pub use emulator::{Emulated, EmulatorConfig};
+pub use gameplay::{CommandGate, Predictor, Reject};
 pub use interest::{Interest, InterestUpdate, SpatialGrid};
 pub use endpoint::{Channel, Client, ClientState, ConnectionId, NetConfig, NetEvent, Server};
 pub use replication::{load_snapshot, save_snapshot, decode_delta, encode_delta, apply_delta, diff, Delta, EntityMap, JitterBuffer, NetId, Op, Snapshot};
