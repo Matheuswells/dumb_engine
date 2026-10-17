@@ -289,6 +289,47 @@ impl<'a> Rd<'a> {
     }
 }
 
+/// Appends the wire encoding of `v` to `b`.
+pub fn encode_value(b: &mut Vec<u8>, v: &Value) {
+    put_value(b, v);
+}
+
+/// Appends a length-prefixed string (strings over 65535 bytes are cut).
+pub fn encode_str(b: &mut Vec<u8>, s: &str) {
+    put_str(b, &s[..s.len().min(u16::MAX as usize)]);
+}
+
+/// Reads fields from untrusted bytes; every method returns `None` when the input runs out or
+/// is malformed.
+pub struct ByteReader<'a>(Rd<'a>);
+
+impl<'a> ByteReader<'a> {
+    pub fn new(b: &'a [u8]) -> Self {
+        ByteReader(Rd(b))
+    }
+    pub fn u8(&mut self) -> Option<u8> {
+        self.0.u8()
+    }
+    pub fn u16(&mut self) -> Option<u16> {
+        self.0.u16()
+    }
+    pub fn u32(&mut self) -> Option<u32> {
+        self.0.u32()
+    }
+    pub fn u64(&mut self) -> Option<u64> {
+        self.0.u64()
+    }
+    pub fn str(&mut self) -> Option<String> {
+        self.0.str()
+    }
+    pub fn value(&mut self) -> Option<Value> {
+        self.0.value(0)
+    }
+    pub fn rest(&self) -> &'a [u8] {
+        (self.0).0
+    }
+}
+
 pub fn encode_delta(d: &Delta) -> Vec<u8> {
     let mut b = Vec::new();
     b.extend_from_slice(&d.tick.to_le_bytes());

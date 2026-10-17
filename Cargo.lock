@@ -1242,6 +1242,7 @@ dependencies = [
  "dumb_asset",
  "dumb_core",
  "dumb_ecs",
+ "dumb_net",
  "dumb_physics",
  "dumb_reflect",
  "dumb_render",

@@ -295,6 +295,8 @@ pub(crate) fn register_builtin(w: &mut World) {
     w.register_type::<Animator>();
     w.register_type::<PrefabInstance>();
     w.register_type::<crate::ai::AiAgent>();
+    w.register_type::<crate::net::Replicated>();
+    w.register_type::<crate::net::NetSession>();
     w.register_type::<crate::streaming::StreamingCell>();
     w.register_type::<crate::streaming::StreamFocus>();
     w.register_type::<crate::hud::UiText>();

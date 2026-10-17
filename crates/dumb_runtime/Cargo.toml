@@ -27,6 +27,7 @@ dumb_asset.workspace = true
 dumb_render = { workspace = true, optional = true }
 dumb_script.workspace = true
 dumb_physics.workspace = true
+dumb_net.workspace = true
 winit = { workspace = true, optional = true }
 egui = { workspace = true, optional = true }
 image = { workspace = true, optional = true }

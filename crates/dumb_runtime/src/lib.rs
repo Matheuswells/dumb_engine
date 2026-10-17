@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 pub mod export;
 #[cfg(feature = "render")]
 pub mod hud_view;
+pub mod net;
 pub mod perf;
 pub mod streaming;
 #[cfg(feature = "render")]
