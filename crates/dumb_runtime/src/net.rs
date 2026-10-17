@@ -23,6 +23,7 @@ use dumb_net::{
     Snapshot, SpatialGrid,
 };
 use dumb_reflect::{Typed, Value};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -78,6 +79,20 @@ fn owner_of(comps: &BTreeMap<String, Value>) -> u64 {
         Some(Value::Int(i)) => *i as u64,
         _ => 0,
     }
+}
+
+/// What `viewer` may see of an entity's components: the `owner` field is a session id, and a
+/// session id authorizes resuming that session, so other players' ids never go on the wire.
+fn redact_owner(comps: &BTreeMap<String, Value>, viewer: u64) -> Cow<'_, BTreeMap<String, Value>> {
+    let owner = owner_of(comps);
+    if owner == 0 || owner == viewer {
+        return Cow::Borrowed(comps);
+    }
+    let mut out = comps.clone();
+    if let Some(Value::Struct(f)) = out.get_mut(Replicated::TYPE_NAME) {
+        f.iter_mut().filter(|(n, _)| n == "owner").for_each(|(_, v)| *v = Value::Int(0));
+    }
+    Cow::Owned(out)
 }
 
 /// A payload is sane when its floats are finite and it is not absurdly large.
@@ -387,13 +402,23 @@ impl<S: Datagram> ServerNet<S> {
             let c = self.conns.get_mut(&id).unwrap();
             // Only entities that changed cost bandwidth, so static ones don't use up the budget.
             let sent = &c.sent;
-            let cost = |k: NetId| if sent.get(&k) == current.get(&k) { 0 } else { 24 + current.get(&k).map_or(0, |m| m.len() * 40) };
+            let view = |k: &NetId| current.get(k).map(|m| redact_owner(m, id.0));
+            let cost = |k: NetId| {
+                let now = view(&k);
+                if sent.get(&k) == now.as_deref() { 0 } else { 24 + now.map_or(0, |m| m.len() * 40) }
+            };
             let upd = c.interest.update(&self.grid, c.viewer, self.cfg.interest_radius, self.cfg.hysteresis, self.cfg.bandwidth_per_tick, cost);
             let fresh: HashSet<NetId> = upd.spawn.iter().chain(&upd.update).copied().collect();
             let mut target = Snapshot::new();
             for k in c.interest.known() {
-                if let Some(comps) = if fresh.contains(k) { current.get(k) } else { c.sent.get(k).or_else(|| current.get(k)) } {
-                    target.insert(*k, comps.clone());
+                if !fresh.contains(k) {
+                    if let Some(old) = c.sent.get(k) {
+                        target.insert(*k, old.clone());
+                        continue;
+                    }
+                }
+                if let Some(comps) = view(k) {
+                    target.insert(*k, comps.into_owned());
                 }
             }
             let delta = diff(&c.sent, &target, c.last_tick, self.tick);
@@ -867,6 +892,19 @@ mod tests {
         let bad: Vec<_> = r.sw.events::<CommandRejected>().map(|c| c.reason.clone()).collect();
         assert_eq!(ok, vec![(1, conn), (3, conn)]);
         assert_eq!(bad, vec!["not owner".to_string(), "invalid".to_string()]);
+    }
+
+    #[test]
+    fn other_players_session_ids_are_not_sent() {
+        let mut r = Rig::new(ServerConfig::default());
+        r.run(0.5);
+        let conn = r.cw.resource::<NetSession>().unwrap().connection;
+        let mine = r.replicated_at(0.0, conn);
+        let other = r.replicated_at(1.0, 12345);
+        r.run(1.0);
+        let owner = |r: &Rig, e: Entity| r.cw.get::<Replicated>(r.client.local_entity(e.to_bits()).unwrap()).unwrap().owner;
+        assert_eq!(owner(&r, mine), conn);
+        assert_eq!(owner(&r, other), 0);
     }
 
     #[test]
